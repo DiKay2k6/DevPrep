@@ -1,14 +1,23 @@
-import { useState } from 'react';
-import { CheckCircle2, HelpCircle, RotateCcw, XCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CheckCircle2, HelpCircle, Loader2, RotateCcw, XCircle } from 'lucide-react';
+import { evaluateMcq } from '../../api/practiceApi.js';
+import { useToast } from '../../components/ToastProvider.jsx';
 import { cn } from '../../utils/cn.js';
 
-export default function McqPanel({ question }) {
+export default function McqPanel({ question, onAttemptComplete }) {
+  const { notify } = useToast();
   const { isMultiple, options, correctOptionIds } = question.payload;
   const [selectedIds, setSelectedIds] = useState([]);
   const [submittedResult, setSubmittedResult] = useState(null);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+
+  useEffect(() => {
+    setSelectedIds([]);
+    setSubmittedResult(null);
+  }, [question._id]);
 
   const handleToggleOption = (optionId) => {
-    if (submittedResult) return;
+    if (submittedResult || isEvaluating) return;
 
     if (isMultiple) {
       setSelectedIds((prev) =>
@@ -21,20 +30,32 @@ export default function McqPanel({ question }) {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (selectedIds.length === 0) return;
+    if (selectedIds.length === 0 || isEvaluating) return;
 
-    const sortedUser = [...selectedIds].sort().join(',');
-    const sortedCorrect = [...correctOptionIds].sort().join(',');
-    const isCorrect = sortedUser === sortedCorrect;
+    setIsEvaluating(true);
+    try {
+      const result = await evaluateMcq(question._id, selectedIds);
+      setSubmittedResult(result);
+      onAttemptComplete?.(result.isCorrect);
 
-    setSubmittedResult({
-      isCorrect,
-      message: isCorrect
-        ? 'Chính xác! Bạn đã chọn đúng toàn bộ phương án.'
-        : 'Chưa chính xác. Hãy xem đối chiếu đáp án và giải thích chi tiết bên dưới.',
-    });
+      notify({
+        title: result.isCorrect
+          ? 'Chính xác! Đã lưu tiến độ câu hỏi'
+          : 'Chưa chính xác — Đã thêm vào hàng đợi ôn tập',
+        message: result.message,
+        type: result.isCorrect ? 'success' : 'info',
+      });
+    } catch (err) {
+      notify({
+        title: 'Không thể chấm điểm câu hỏi',
+        message: err.message,
+        type: 'error',
+      });
+    } finally {
+      setIsEvaluating(false);
+    }
   };
 
   const handleReset = () => {
@@ -70,7 +91,8 @@ export default function McqPanel({ question }) {
             const isChecked = selectedIds.includes(opt.id);
             const isCorrectOption = correctOptionIds.includes(opt.id);
 
-            let cardStateClass = 'border-slate-200 bg-white hover:border-slate-300';
+            let cardStateClass =
+              'border-slate-200 bg-white hover:border-slate-300';
             if (submittedResult) {
               if (isCorrectOption) {
                 cardStateClass = 'border-emerald-500 bg-emerald-50/60';
@@ -78,7 +100,8 @@ export default function McqPanel({ question }) {
                 cardStateClass = 'border-red-400 bg-red-50/60';
               }
             } else if (isChecked) {
-              cardStateClass = 'border-blue-600 bg-blue-50/40 ring-2 ring-blue-600/15';
+              cardStateClass =
+                'border-blue-600 bg-blue-50/40 ring-2 ring-blue-600/15';
             }
 
             return (
@@ -97,7 +120,7 @@ export default function McqPanel({ question }) {
                   value={opt.id}
                   checked={isChecked}
                   onChange={() => handleToggleOption(opt.id)}
-                  disabled={Boolean(submittedResult)}
+                  disabled={Boolean(submittedResult) || isEvaluating}
                   className="mt-1 w-4 h-4 accent-blue-600 shrink-0"
                 />
                 <div className="flex-1 min-w-0 space-y-1">
@@ -107,7 +130,10 @@ export default function McqPanel({ question }) {
                     </span>
                     {submittedResult && isCorrectOption && (
                       <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                        <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        <CheckCircle2
+                          className="w-3.5 h-3.5"
+                          aria-hidden="true"
+                        />
                         <span>Đáp án đúng</span>
                       </span>
                     )}
@@ -130,10 +156,19 @@ export default function McqPanel({ question }) {
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <button
             type="submit"
-            disabled={selectedIds.length === 0 || Boolean(submittedResult)}
-            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-500 text-white text-sm font-semibold transition-colors"
+            disabled={
+              selectedIds.length === 0 ||
+              Boolean(submittedResult) ||
+              isEvaluating
+            }
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-500 text-white text-sm font-semibold transition-colors"
           >
-            Kiểm tra đáp án
+            {isEvaluating && (
+              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+            )}
+            <span>
+              {isEvaluating ? 'Đang đối chiếu...' : 'Kiểm tra đáp án'}
+            </span>
           </button>
 
           {submittedResult && (
@@ -163,9 +198,15 @@ export default function McqPanel({ question }) {
         >
           <div className="flex items-center gap-2 font-bold text-sm">
             {submittedResult.isCorrect ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" aria-hidden="true" />
+              <CheckCircle2
+                className="w-5 h-5 text-emerald-600 shrink-0"
+                aria-hidden="true"
+              />
             ) : (
-              <HelpCircle className="w-5 h-5 text-amber-600 shrink-0" aria-hidden="true" />
+              <HelpCircle
+                className="w-5 h-5 text-amber-600 shrink-0"
+                aria-hidden="true"
+              />
             )}
             <span>{submittedResult.message}</span>
           </div>

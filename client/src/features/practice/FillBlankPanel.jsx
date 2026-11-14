@@ -1,30 +1,55 @@
-import { useState } from 'react';
-import { CheckCircle2, RotateCcw, Terminal, XCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import {
+  CheckCircle2,
+  Loader2,
+  RotateCcw,
+  Terminal,
+  XCircle,
+} from 'lucide-react';
+import { evaluateFillBlank } from '../../api/practiceApi.js';
+import { useToast } from '../../components/ToastProvider.jsx';
 import { cn } from '../../utils/cn.js';
 
-export default function FillBlankPanel({ question }) {
+export default function FillBlankPanel({ question, onAttemptComplete }) {
+  const { notify } = useToast();
   const { placeholder, caseSensitive, acceptedAnswers } = question.payload;
   const [answerText, setAnswerText] = useState('');
   const [evaluation, setEvaluation] = useState(null);
+  const [isEvaluating, setIsEvaluating] = useState(false);
 
-  const normalize = (str) => {
-    const trimmed = str.trim().replace(/\s+/g, ' ');
-    return caseSensitive ? trimmed : trimmed.toLowerCase();
-  };
+  useEffect(() => {
+    setAnswerText('');
+    setEvaluation(null);
+  }, [question._id]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!answerText.trim()) return;
+    if (!answerText.trim() || isEvaluating) return;
 
-    const normalizedUser = normalize(answerText);
-    const isMatched = acceptedAnswers.some(
-      (ans) => normalize(ans) === normalizedUser
-    );
+    setIsEvaluating(true);
+    try {
+      const result = await evaluateFillBlank(question._id, answerText);
+      setEvaluation(result);
+      onAttemptComplete?.(result.isCorrect);
 
-    setEvaluation({
-      isCorrect: isMatched,
-      userAnswer: answerText.trim(),
-    });
+      notify({
+        title: result.isCorrect
+          ? 'Accepted — Kết quả trùng khớp!'
+          : 'Wrong Answer — Đã xếp vào hàng đợi ôn tập',
+        message: result.isCorrect
+          ? 'Đã ghi nhận câu hỏi vào danh sách hoàn thành.'
+          : 'Câu hỏi được đặt lịch ôn lại sau 1 ngày (Spaced Repetition).',
+        type: result.isCorrect ? 'success' : 'info',
+      });
+    } catch (err) {
+      notify({
+        title: 'Không thể kiểm tra câu trả lời',
+        message: err.message,
+        type: 'error',
+      });
+    } finally {
+      setIsEvaluating(false);
+    }
   };
 
   const handleReset = () => {
@@ -40,7 +65,7 @@ export default function FillBlankPanel({ question }) {
             Điền Câu trả lời / Dự đoán Output (Fill-in-the-blank)
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Hệ thống tự động cắt khoảng trắng thừa ở hai đầu trước khi so khớp với tập đáp án chuẩn.
+            Hệ thống tự động chuẩn hóa khoảng trắng thừa trước khi đối chiếu với tập đáp án chuẩn.
           </p>
         </div>
 
@@ -77,7 +102,10 @@ export default function FillBlankPanel({ question }) {
               className="w-full min-h-[48px] px-4 py-3 rounded-xl border border-slate-300 bg-slate-50/70 focus:bg-white font-mono text-sm text-slate-900 focus:border-blue-600"
             />
           </div>
-          <p id={`fill-hint-${question._id}`} className="text-xs text-slate-500 flex items-center gap-1.5">
+          <p
+            id={`fill-hint-${question._id}`}
+            className="text-xs text-slate-500 flex items-center gap-1.5"
+          >
             <Terminal className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
             <span>Gợi ý định dạng: {placeholder}</span>
           </p>
@@ -86,10 +114,15 @@ export default function FillBlankPanel({ question }) {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={!answerText.trim()}
-            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-500 text-white text-sm font-semibold transition-colors"
+            disabled={!answerText.trim() || isEvaluating}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-500 text-white text-sm font-semibold transition-colors"
           >
-            Đối chiếu kết quả
+            {isEvaluating && (
+              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+            )}
+            <span>
+              {isEvaluating ? 'Đang đối chiếu...' : 'Đối chiếu kết quả'}
+            </span>
           </button>
 
           {evaluation && (
@@ -119,7 +152,10 @@ export default function FillBlankPanel({ question }) {
           <div className="flex items-center gap-2 text-sm font-bold">
             {evaluation.isCorrect ? (
               <>
-                <CheckCircle2 className="w-5 h-5 text-emerald-600" aria-hidden="true" />
+                <CheckCircle2
+                  className="w-5 h-5 text-emerald-600"
+                  aria-hidden="true"
+                />
                 <span className="text-emerald-900">
                   Accepted — Câu trả lời hoàn toàn khớp!
                 </span>

@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckCircle2, Clock, FileCode2, XCircle } from 'lucide-react';
-import { QUESTIONS_MOCK } from '../../data/questions.mock.js';
+import { getQuestions, moderateQuestion } from '../../api/questionsApi.js';
+import { useToast } from '../../components/ToastProvider.jsx';
+import { EmptyState, LoadingSkeleton } from '../../components/UiStates.jsx';
 import { cn } from '../../utils/cn.js';
 
 const STATUS_TABS = [
@@ -16,25 +18,56 @@ const FORMAT_LABELS = {
 };
 
 export default function AdminModerationPage() {
-  const [questions, setQuestions] = useState(QUESTIONS_MOCK);
+  const { notify } = useToast();
+  const [questions, setQuestions] = useState([]);
   const [activeStatus, setActiveStatus] = useState('pending');
-  const [feedbackBanner, setFeedbackBanner] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  const handleModerate = (id, newStatus) => {
-    setQuestions((prev) =>
-      prev.map((q) => (q._id === id ? { ...q, status: newStatus } : q))
-    );
-    const target = questions.find((q) => q._id === id);
-    const statusLabel = newStatus === 'approved' ? 'Đã xuất bản' : 'Đã từ chối';
-    setFeedbackBanner(
-      `Đã cập nhật câu hỏi "${target?.title}" sang trạng thái "${statusLabel}".`
-    );
+  useEffect(() => {
+    let mounted = true;
+    getQuestions({ status: 'All' })
+      .then((list) => {
+        if (mounted) setQuestions(list);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleModerate = async (id, newStatus) => {
+    try {
+      const res = await moderateQuestion(id, newStatus);
+      setQuestions(res.questions);
+      const statusLabel =
+        newStatus === 'approved' ? 'Đã xuất bản' : 'Đã từ chối';
+      notify({
+        title: `Đã cập nhật trạng thái: ${statusLabel}`,
+        message: `Câu hỏi "${res.question?.title}" đã được lưu vào bộ nhớ trình duyệt.`,
+        type: newStatus === 'approved' ? 'success' : 'info',
+      });
+    } catch (err) {
+      notify({
+        title: 'Lỗi khi kiểm duyệt câu hỏi',
+        message: err.message,
+        type: 'error',
+      });
+    }
   };
 
-  const filteredList = questions.filter((q) => q.status === activeStatus);
+  if (loading) {
+    return (
+      <LoadingSkeleton
+        rows={3}
+        label="Đang tải danh sách câu hỏi đóng góp..."
+      />
+    );
+  }
 
-  const countByStatus = (st) =>
-    questions.filter((q) => q.status === st).length;
+  const filteredList = questions.filter((q) => q.status === activeStatus);
+  const countByStatus = (st) => questions.filter((q) => q.status === st).length;
 
   return (
     <div className="space-y-6">
@@ -57,16 +90,6 @@ export default function AdminModerationPage() {
           </span>
         </div>
       </header>
-
-      {feedbackBanner && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-xs sm:text-sm font-medium text-blue-900"
-        >
-          {feedbackBanner}
-        </div>
-      )}
 
       <div
         role="tablist"
@@ -96,9 +119,10 @@ export default function AdminModerationPage() {
       </div>
 
       {filteredList.length === 0 ? (
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-10 text-center text-sm text-slate-500">
-          Không có câu hỏi nào trong mục này.
-        </div>
+        <EmptyState
+          title="Không có câu hỏi nào trong mục này"
+          description="Tất cả câu hỏi đóng góp ở trạng thái này đã được xử lý."
+        />
       ) : (
         <div className="space-y-4">
           {filteredList.map((q) => (
@@ -137,7 +161,10 @@ export default function AdminModerationPage() {
                       onClick={() => handleModerate(q._id, 'approved')}
                       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs transition-colors"
                     >
-                      <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      <CheckCircle2
+                        className="w-3.5 h-3.5"
+                        aria-hidden="true"
+                      />
                       <span>Phê duyệt</span>
                     </button>
                   )}
@@ -154,7 +181,9 @@ export default function AdminModerationPage() {
                 </div>
               </header>
 
-              <p className="text-sm text-slate-700 leading-relaxed">{q.prompt}</p>
+              <p className="text-sm text-slate-700 leading-relaxed">
+                {q.prompt}
+              </p>
 
               {q.codeSnippet && (
                 <pre className="p-3.5 rounded-xl bg-slate-900 text-slate-100 text-xs font-mono overflow-x-auto">
@@ -164,8 +193,13 @@ export default function AdminModerationPage() {
 
               <div className="p-3.5 rounded-xl bg-[#F4F7FA] border border-slate-200/80 text-xs space-y-1.5">
                 <div className="font-semibold text-slate-800 inline-flex items-center gap-1.5">
-                  <FileCode2 className="w-3.5 h-3.5 text-blue-600" aria-hidden="true" />
-                  <span>Cấu hình đáp án chuẩn (Chỉ hiển thị cho Quản trị viên):</span>
+                  <FileCode2
+                    className="w-3.5 h-3.5 text-blue-600"
+                    aria-hidden="true"
+                  />
+                  <span>
+                    Cấu hình đáp án chuẩn (Chỉ hiển thị cho Quản trị viên):
+                  </span>
                 </div>
 
                 {q.type === 'mcq' && (
@@ -188,7 +222,11 @@ export default function AdminModerationPage() {
 
                 {q.type === 'coding' && (
                   <p className="text-slate-600">
-                    Hàm kiểm thử: <code className="font-mono">{q.payload.functionName}</code> • Tổng số ca kiểm thử:{' '}
+                    Hàm kiểm thử:{' '}
+                    <code className="font-mono">
+                      {q.payload.functionName}
+                    </code>{' '}
+                    • Tổng số ca kiểm thử:{' '}
                     <strong>{q.payload.testCases.length}</strong> (Bao gồm cả ca kiểm thử ẩn)
                   </p>
                 )}

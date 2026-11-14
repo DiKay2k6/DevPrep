@@ -1,16 +1,19 @@
-import { useState } from 'react';
-import { Link, useOutletContext } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import {
   BookOpen,
-  CheckCircle2,
   Code2,
   Flame,
+  LogOut,
   Mail,
   Save,
   Shield,
   Target,
 } from 'lucide-react';
+import { getCurrentUser, logout, updateProfile } from '../../api/authApi.js';
 import SkillPicker from '../../components/SkillPicker.jsx';
+import { useToast } from '../../components/ToastProvider.jsx';
+import { LoadingSkeleton } from '../../components/UiStates.jsx';
 import {
   CAREER_TRACKS,
   LEVELS,
@@ -19,30 +22,94 @@ import {
 } from '../../data/tracks.mock.js';
 
 export default function ProfilePage() {
+  const navigate = useNavigate();
+  const { notify } = useToast();
   const outletCtx = useOutletContext() || {};
-  const [localSkills, setLocalSkills] = useState(
-    MOCK_USER_PROFILE.selectedSkills
-  );
+  const selectedSkills =
+    outletCtx.selectedSkills || MOCK_USER_PROFILE.selectedSkills;
+  const setSelectedSkills = outletCtx.setSelectedSkills || (() => {});
 
-  const selectedSkills = outletCtx.selectedSkills || localSkills;
-  const setSelectedSkills = outletCtx.setSelectedSkills || setLocalSkills;
-
+  const [loading, setLoading] = useState(true);
+  const [userStats, setUserStats] = useState(MOCK_USER.stats);
+  const [userMeta, setUserMeta] = useState({
+    email: MOCK_USER.email,
+    role: MOCK_USER.role,
+    joinedAt: MOCK_USER.joinedAt,
+  });
   const [profile, setProfile] = useState({
     fullName: MOCK_USER.fullName,
-    targetLevel: MOCK_USER.targetLevel,
+    targetLevel:
+      outletCtx.globalLevel && outletCtx.globalLevel !== 'All'
+        ? outletCtx.globalLevel
+        : MOCK_USER.targetLevel,
     targetTrack: MOCK_USER.targetTrack,
     bio: MOCK_USER.bio,
   });
-  const [savedNotice, setSavedNotice] = useState(false);
 
-  const handleSave = (e) => {
+  useEffect(() => {
+    let mounted = true;
+    getCurrentUser()
+      .then((user) => {
+        if (!mounted || !user) return;
+        setProfile({
+          fullName: user.fullName || MOCK_USER.fullName,
+          targetLevel: user.targetLevel || MOCK_USER.targetLevel,
+          targetTrack: user.targetTrack || MOCK_USER.targetTrack,
+          bio: user.bio || MOCK_USER.bio,
+        });
+        setUserStats(user.stats || MOCK_USER.stats);
+        setUserMeta({
+          email: user.email || MOCK_USER.email,
+          role: user.role || MOCK_USER.role,
+          joinedAt: user.joinedAt || MOCK_USER.joinedAt,
+        });
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleSave = async (e) => {
     e.preventDefault();
-    if (typeof outletCtx.setGlobalLevel === 'function') {
-      outletCtx.setGlobalLevel(profile.targetLevel);
+    try {
+      const updated = await updateProfile({
+        ...profile,
+        selectedSkills,
+      });
+      if (typeof outletCtx.setGlobalLevel === 'function') {
+        outletCtx.setGlobalLevel(profile.targetLevel);
+      }
+      setUserStats(updated.stats || userStats);
+      notify({
+        title: 'Đã lưu cấu hình hồ sơ & kỹ năng!',
+        message: `Cấp độ mục tiêu: ${profile.targetLevel} • ${selectedSkills.length} kỹ năng chuyên môn đã được đồng bộ.`,
+        type: 'success',
+      });
+    } catch (err) {
+      notify({
+        title: 'Lỗi khi lưu hồ sơ',
+        message: err.message,
+        type: 'error',
+      });
     }
-    setSavedNotice(true);
-    setTimeout(() => setSavedNotice(false), 2500);
   };
+
+  const handleLogout = async () => {
+    await logout();
+    notify({
+      title: 'Đã đăng xuất khỏi phiên làm việc',
+      message: 'Dữ liệu học tập trên trình duyệt vẫn được giữ nguyên.',
+      type: 'info',
+    });
+    navigate('/login');
+  };
+
+  if (loading) {
+    return <LoadingSkeleton rows={3} label="Đang tải hồ sơ ứng viên..." />;
+  }
 
   return (
     <div className="space-y-6">
@@ -50,7 +117,12 @@ export default function ProfilePage() {
       <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-start sm:items-center gap-4">
           <div className="w-16 h-16 rounded-2xl bg-blue-600 text-white font-bold text-xl flex items-center justify-center shrink-0 shadow-sm">
-            NK
+            {profile.fullName
+              .split(/\s+/)
+              .slice(-2)
+              .map((w) => w[0])
+              .join('')
+              .toUpperCase()}
           </div>
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -59,14 +131,14 @@ export default function ProfilePage() {
               </h1>
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 text-xs font-semibold">
                 <Shield className="w-3 h-3" aria-hidden="true" />
-                <span>Vai trò: {MOCK_USER.role}</span>
+                <span>Vai trò: {userMeta.role}</span>
               </span>
             </div>
             <p className="text-xs sm:text-sm text-slate-500 inline-flex items-center gap-1.5">
               <Mail className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>{MOCK_USER.email}</span>
+              <span>{userMeta.email}</span>
               <span>•</span>
-              <span>Tham gia từ {MOCK_USER.joinedAt}</span>
+              <span>Tham gia từ {userMeta.joinedAt}</span>
             </p>
             <p className="text-sm text-slate-700 pt-1">{profile.bio}</p>
           </div>
@@ -79,24 +151,29 @@ export default function ProfilePage() {
           >
             Xem Bản đồ Lỗ hổng Kiến thức
           </Link>
-          <Link
-            to="/login"
-            className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium transition-colors"
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-200 hover:border-red-200 text-xs font-semibold transition-colors"
           >
-            Đổi tài khoản
-          </Link>
+            <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Đăng xuất</span>
+          </button>
         </div>
       </section>
 
       {/* Thống kê năng lực thực hành */}
-      <section aria-label="Chỉ số luyện tập cá nhân" className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <section
+        aria-label="Chỉ số luyện tập cá nhân"
+        className="grid grid-cols-2 lg:grid-cols-4 gap-4"
+      >
         <article className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
           <div className="flex items-center justify-between text-xs font-medium text-slate-500">
             <span>Chuỗi ngày học (Streak)</span>
             <Flame className="w-4 h-4 text-amber-500" aria-hidden="true" />
           </div>
           <p className="mt-2 text-2xl font-bold text-slate-900">
-            {MOCK_USER.stats.streakDays} ngày
+            {userStats.streakDays} ngày
           </p>
           <p className="text-xs text-slate-500 mt-1">Duy trì đều đặn mỗi ngày</p>
         </article>
@@ -107,10 +184,10 @@ export default function ProfilePage() {
             <Code2 className="w-4 h-4 text-blue-600" aria-hidden="true" />
           </div>
           <p className="mt-2 text-2xl font-bold text-slate-900">
-            {MOCK_USER.stats.solvedQuestions} / 68
+            {userStats.solvedQuestions} / 68
           </p>
           <p className="text-xs text-slate-500 mt-1">
-            Tổng {MOCK_USER.stats.totalSubmissions} lượt nộp bài
+            Đồng bộ tự động với bộ nhớ trình duyệt
           </p>
         </article>
 
@@ -120,46 +197,36 @@ export default function ProfilePage() {
             <Target className="w-4 h-4 text-emerald-600" aria-hidden="true" />
           </div>
           <p className="mt-2 text-2xl font-bold text-emerald-700">
-            {MOCK_USER.stats.accuracyRate}%
+            {userStats.accuracyRate}%
           </p>
           <p className="text-xs text-slate-500 mt-1">Trung bình cả 3 định dạng</p>
         </article>
 
         <article className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
           <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-            <span>Tài liệu &amp; Đề thi thử</span>
+            <span>Tài liệu đã hoàn thành</span>
             <BookOpen className="w-4 h-4 text-purple-600" aria-hidden="true" />
           </div>
           <p className="mt-2 text-2xl font-bold text-slate-900">
-            {MOCK_USER.stats.readArticles} bài đọc
+            {userStats.readArticles} bài đọc
           </p>
           <p className="text-xs text-slate-500 mt-1">
-            Đã hoàn thành {MOCK_USER.stats.completedMockTests} đề thi thử
+            Đã hoàn thành {userStats.completedMockTests} đề thi thử
           </p>
         </article>
       </section>
 
       {/* Form cập nhật Mục tiêu Phỏng vấn & Nhóm Kỹ năng Chuyên môn */}
       <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-        <h2 id="profile-settings-heading" className="text-lg font-bold text-slate-900">
+        <h2
+          id="profile-settings-heading"
+          className="text-lg font-bold text-slate-900"
+        >
           Cấu hình Mục tiêu Ôn luyện &amp; Nhóm Kỹ năng
         </h2>
         <p className="text-xs text-slate-500 mt-0.5 mb-5">
           Tùy chỉnh cấp độ mục tiêu và các kỹ năng công nghệ để hệ thống đề xuất bài đọc, câu hỏi sát nhất với định hướng của bạn.
         </p>
-
-        {savedNotice && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="mb-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-800 inline-flex items-center gap-2"
-          >
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" aria-hidden="true" />
-            <span>
-              Đã lưu cấu hình mục tiêu ({profile.targetLevel}) và {selectedSkills.length} kỹ năng chuyên môn!
-            </span>
-          </div>
-        )}
 
         <form
           aria-labelledby="profile-settings-heading"
@@ -188,7 +255,10 @@ export default function ProfilePage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="profile-bio" className="text-sm font-semibold text-slate-800">
+              <label
+                htmlFor="profile-bio"
+                className="text-sm font-semibold text-slate-800"
+              >
                 Ghi chú mục tiêu nghề nghiệp
               </label>
               <input
@@ -222,7 +292,10 @@ export default function ProfilePage() {
                     value={lvl.id}
                     checked={profile.targetLevel === lvl.id}
                     onChange={(e) =>
-                      setProfile((prev) => ({ ...prev, targetLevel: e.target.value }))
+                      setProfile((prev) => ({
+                        ...prev,
+                        targetLevel: e.target.value,
+                      }))
                     }
                     className="accent-blue-600"
                   />
@@ -250,7 +323,10 @@ export default function ProfilePage() {
                     value={tr.id}
                     checked={profile.targetTrack === tr.id}
                     onChange={(e) =>
-                      setProfile((prev) => ({ ...prev, targetTrack: e.target.value }))
+                      setProfile((prev) => ({
+                        ...prev,
+                        targetTrack: e.target.value,
+                      }))
                     }
                     className="accent-blue-600"
                   />
@@ -260,7 +336,6 @@ export default function ProfilePage() {
             </div>
           </fieldset>
 
-          {/* Tích hợp SkillPicker để quản lý Nhóm Kỹ năng – Công nghệ */}
           <div className="pt-2 border-t border-slate-100 space-y-2">
             <div>
               <h3 className="text-sm font-bold text-slate-900">

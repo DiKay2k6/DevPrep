@@ -1,8 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
-import { ArrowRight, BookOpen, Clock, Code2, FileText } from 'lucide-react';
+import {
+  ArrowRight,
+  BookOpen,
+  CheckCircle2,
+  Clock,
+  Code2,
+} from 'lucide-react';
+import { getArticles } from '../../api/articlesApi.js';
 import LevelFilterBar from '../../components/LevelFilterBar.jsx';
-import { ARTICLES_MOCK } from '../../data/articles.mock.js';
+import { EmptyState, LoadingSkeleton } from '../../components/UiStates.jsx';
 import { LEVELS, MOCK_USER_PROFILE } from '../../data/tracks.mock.js';
 import { cn } from '../../utils/cn.js';
 
@@ -27,6 +34,29 @@ export default function StudyHubListPage() {
   const [selectedCategory, setSelectedCategory] = useState(initialCategory);
   const [onlyMySkills, setOnlyMySkills] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [articles, setArticles] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    getArticles({
+      level: globalLevel,
+      category: selectedCategory,
+      onlyMySkills,
+      selectedSkills,
+      searchQuery,
+    })
+      .then((list) => {
+        if (mounted) setArticles(list);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [globalLevel, selectedCategory, onlyMySkills, selectedSkills, searchQuery]);
 
   const handleCategoryChange = (cat) => {
     setSelectedCategory(cat);
@@ -38,22 +68,12 @@ export default function StudyHubListPage() {
     setSearchParams(searchParams, { replace: true });
   };
 
-  const filteredArticles = ARTICLES_MOCK.filter((article) => {
-    const matchLevel = globalLevel === 'All' || article.level === globalLevel;
-    const matchCategory =
-      selectedCategory === 'All' || article.category === selectedCategory;
-    const matchSkills =
-      !onlyMySkills ||
-      selectedSkills.length === 0 ||
-      article.tags.some((t) => selectedSkills.includes(t));
-    const q = searchQuery.trim().toLowerCase();
-    const matchQuery =
-      !q ||
-      article.title.toLowerCase().includes(q) ||
-      article.summary.toLowerCase().includes(q) ||
-      article.tags.some((t) => t.toLowerCase().includes(q));
-    return matchLevel && matchCategory && matchSkills && matchQuery;
-  });
+  const handleResetFilters = () => {
+    setGlobalLevel('All');
+    handleCategoryChange('All');
+    setOnlyMySkills(false);
+    setSearchQuery('');
+  };
 
   const getLevelBadgeClass = (levelId) =>
     LEVELS.find((l) => l.id === levelId)?.badgeClass ||
@@ -67,7 +87,7 @@ export default function StudyHubListPage() {
             Kho Tài liệu Kỹ thuật
           </h1>
           <p className="text-xs sm:text-sm text-slate-500">
-            Hệ thống bài đọc lý thuyết cốt lõi kèm ví dụ minh họa và câu hỏi thực hành theo từng nhóm kỹ năng – công nghệ.
+            Hệ thống bài đọc lý thuyết cốt lõi kèm mục lục tự động, ví dụ minh họa và câu hỏi thực hành theo từng nhóm kỹ năng.
           </p>
         </div>
 
@@ -91,7 +111,7 @@ export default function StudyHubListPage() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         searchPlaceholder="Tìm bài viết theo kỹ năng (VD: Java, Python, Tailwind CSS, Kotlin, Swift...)"
-        totalCount={filteredArticles.length}
+        totalCount={articles.length}
       />
 
       {onlyMySkills && (
@@ -109,22 +129,18 @@ export default function StudyHubListPage() {
         </div>
       )}
 
-      {filteredArticles.length === 0 ? (
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-10 text-center space-y-3">
-          <FileText
-            className="w-10 h-10 text-slate-400 mx-auto"
-            aria-hidden="true"
-          />
-          <h2 className="text-base font-bold text-slate-900">
-            Không tìm thấy bài tài liệu phù hợp
-          </h2>
-          <p className="text-sm text-slate-500 max-w-md mx-auto">
-            Hãy thử tắt bộ lọc &ldquo;Phù hợp kỹ năng của tôi&rdquo;, chọn lại &ldquo;Tất cả trình độ&rdquo; hoặc xóa từ khóa tìm kiếm.
-          </p>
-        </div>
+      {loading ? (
+        <LoadingSkeleton rows={3} label="Đang tải danh sách bài viết..." />
+      ) : articles.length === 0 ? (
+        <EmptyState
+          title="Không tìm thấy bài tài liệu phù hợp"
+          description="Hãy thử tắt bộ lọc 'Phù hợp kỹ năng của tôi', chọn lại 'Tất cả trình độ' hoặc xóa từ khóa tìm kiếm."
+          actionLabel="Đặt lại bộ lọc"
+          onAction={handleResetFilters}
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredArticles.map((article) => {
+          {articles.map((article) => {
             const pastelClass =
               CATEGORY_PASTELS[article.category] || CATEGORY_PASTELS.Frontend;
 
@@ -143,14 +159,25 @@ export default function StudyHubListPage() {
                     <span className="px-2.5 py-0.5 rounded-full bg-white/90 font-bold text-[11px]">
                       {article.category}
                     </span>
-                    <span
-                      className={cn(
-                        'px-2.5 py-0.5 rounded-full font-bold border bg-white/90',
-                        getLevelBadgeClass(article.level)
+                    <div className="flex items-center gap-1.5">
+                      {article.isCompleted && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-600 text-white font-bold text-[11px]">
+                          <CheckCircle2
+                            className="w-3 h-3"
+                            aria-hidden="true"
+                          />
+                          <span>Đã đọc</span>
+                        </span>
                       )}
-                    >
-                      {article.level}
-                    </span>
+                      <span
+                        className={cn(
+                          'px-2.5 py-0.5 rounded-full font-bold border bg-white/90',
+                          getLevelBadgeClass(article.level)
+                        )}
+                      >
+                        {article.level}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between text-xs font-medium text-slate-700 pt-2">
@@ -179,9 +206,12 @@ export default function StudyHubListPage() {
                     to={`/study-hub/${article.slug}`}
                     className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-blue-600"
                   >
-                    <BookOpen className="w-3.5 h-3.5 text-blue-600" aria-hidden="true" />
+                    <BookOpen
+                      className="w-3.5 h-3.5 text-blue-600"
+                      aria-hidden="true"
+                    />
                     <span>
-                      Đọc bài viết
+                      {article.isCompleted ? 'Đọc lại bài' : 'Đọc bài viết'}
                       <span className="visually-hidden">: {article.title}</span>
                     </span>
                   </Link>

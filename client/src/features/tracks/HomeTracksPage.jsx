@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import {
   ArrowRight,
@@ -13,18 +13,19 @@ import {
   Trophy,
   X,
 } from 'lucide-react';
+import { getArticles } from '../../api/articlesApi.js';
+import { getQuestions } from '../../api/questionsApi.js';
 import { SkillPickerModal } from '../../components/SkillPicker.jsx';
-import SkillRecommendationsSection from './SkillRecommendationsSection.jsx';
+import { useToast } from '../../components/ToastProvider.jsx';
 import {
   ALL_SKILLS,
   CAREER_TRACKS,
   LEVELS,
-  MOCK_USER,
   MOCK_USER_PROFILE,
 } from '../../data/tracks.mock.js';
-import { ARTICLES_MOCK } from '../../data/articles.mock.js';
-import { QUESTIONS_MOCK } from '../../data/questions.mock.js';
 import { cn } from '../../utils/cn.js';
+import { getSolvedQuestionIds } from '../../utils/storage.js';
+import SkillRecommendationsSection from './SkillRecommendationsSection.jsx';
 
 const TRACK_VISUALS = {
   Frontend: {
@@ -68,6 +69,7 @@ const LEVEL_PILLS = [
 ];
 
 export default function HomeTracksPage() {
+  const { notify } = useToast();
   const outletCtx = useOutletContext() || {};
   const globalLevel = outletCtx.globalLevel || 'All';
   const setGlobalLevel = outletCtx.setGlobalLevel || (() => {});
@@ -78,12 +80,45 @@ export default function HomeTracksPage() {
   const [activeTab, setActiveTab] = useState('tracks');
   const [searchText, setSearchText] = useState('');
   const [skillModalOpen, setSkillModalOpen] = useState(false);
+  const [recommendedArticles, setRecommendedArticles] = useState([]);
+  const [recommendedQuestions, setRecommendedQuestions] = useState([]);
 
   const activeLevelForRoadmap = globalLevel === 'All' ? 'Junior' : globalLevel;
-  const approvedQuestions = QUESTIONS_MOCK.filter((q) => q.status === 'approved');
+  const solvedCount = Math.max(getSolvedQuestionIds().length, 38);
+
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([
+      getArticles({
+        level: globalLevel,
+        onlyMySkills: true,
+        selectedSkills,
+      }),
+      getQuestions({
+        status: 'approved',
+        level: globalLevel,
+        onlyMySkills: true,
+        selectedSkills,
+        searchQuery: searchText,
+      }),
+    ]).then(([arts, qs]) => {
+      if (!mounted) return;
+      setRecommendedArticles(arts);
+      setRecommendedQuestions(qs);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [globalLevel, selectedSkills, searchText]);
 
   const removeSkill = (skillId) => {
-    setSelectedSkills(selectedSkills.filter((id) => id !== skillId));
+    const next = selectedSkills.filter((id) => id !== skillId);
+    setSelectedSkills(next);
+    notify({
+      title: 'Đã cập nhật nhóm kỹ năng mục tiêu',
+      message: `Còn ${next.length} kỹ năng đang được ưu tiên đề xuất.`,
+      type: 'info',
+    });
   };
 
   const getSkillLabel = (skillId) =>
@@ -99,31 +134,8 @@ export default function HomeTracksPage() {
     );
   });
 
-  // Lọc Bài học & Câu hỏi đề xuất theo selectedSkills ($in) kết hợp cấp độ
-  const recommendedArticles = ARTICLES_MOCK.filter((art) => {
-    const matchLevel = globalLevel === 'All' || art.level === globalLevel;
-    const matchSkills =
-      selectedSkills.length === 0 ||
-      art.tags.some((t) => selectedSkills.includes(t));
-    return matchLevel && matchSkills;
-  });
-
-  const recommendedQuestions = approvedQuestions.filter((q) => {
-    const matchLevel = globalLevel === 'All' || q.level === globalLevel;
-    const matchSkills =
-      selectedSkills.length === 0 ||
-      q.tags.some((t) => selectedSkills.includes(t));
-    const kw = searchText.trim().toLowerCase();
-    const matchKw =
-      !kw ||
-      q.title.toLowerCase().includes(kw) ||
-      q.tags.some((t) => t.toLowerCase().includes(kw));
-    return matchLevel && matchSkills && matchKw;
-  });
-
   return (
     <div className="space-y-6">
-      {/* Thanh "Bộ kỹ năng mục tiêu của bạn" */}
       <section
         aria-labelledby="selected-skills-heading"
         className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4"
@@ -177,7 +189,6 @@ export default function HomeTracksPage() {
         </button>
       </section>
 
-      {/* Bảng điều khiển Lộ trình & Chuyên ngành */}
       <section
         aria-labelledby="tracks-dashboard-heading"
         className="bg-white border border-slate-200/80 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6"
@@ -233,13 +244,15 @@ export default function HomeTracksPage() {
             </div>
 
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-50/80 border border-amber-200/80 text-xs font-bold text-slate-800 whitespace-nowrap">
-              <Trophy className="w-3.5 h-3.5 text-amber-500" aria-hidden="true" />
-              <span>{MOCK_USER.stats.solvedQuestions}/68 câu</span>
+              <Trophy
+                className="w-3.5 h-3.5 text-amber-500"
+                aria-hidden="true"
+              />
+              <span>{solvedCount}/68 câu</span>
             </div>
           </div>
         </div>
 
-        {/* Hàng Pill Filter cấp độ + Ô tìm kiếm */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             {LEVEL_PILLS.map((pill) => {
@@ -282,14 +295,14 @@ export default function HomeTracksPage() {
           </div>
         </div>
 
-        {/* Lưới 5 chuyên ngành (bao gồm Mobile) hoặc 4 cấp độ */}
         {activeTab === 'tracks' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
             {filteredTracks.map((track) => {
               const visual = TRACK_VISUALS[track.id] || TRACK_VISUALS.Frontend;
               const Icon = visual.icon;
               const milestones =
-                track.milestones[activeLevelForRoadmap] || track.milestones.Junior;
+                track.milestones[activeLevelForRoadmap] ||
+                track.milestones.Junior;
 
               return (
                 <article
@@ -322,7 +335,9 @@ export default function HomeTracksPage() {
 
                   <div className="space-y-2 flex-1">
                     <h2 className="text-sm font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
-                      <Link to={`/practice?category=${encodeURIComponent(track.id)}`}>
+                      <Link
+                        to={`/practice?category=${encodeURIComponent(track.id)}`}
+                      >
                         {track.title}
                       </Link>
                     </h2>
@@ -407,7 +422,9 @@ export default function HomeTracksPage() {
                         : 'bg-[#F4F7FA] hover:bg-slate-200 text-slate-700'
                     )}
                   >
-                    {isSelected ? 'Đang chọn cấp độ này' : `Chọn cấp độ ${lvl.label}`}
+                    {isSelected
+                      ? 'Đang chọn cấp độ này'
+                      : `Chọn cấp độ ${lvl.label}`}
                   </button>
                 </article>
               );
@@ -416,7 +433,6 @@ export default function HomeTracksPage() {
         )}
       </section>
 
-      {/* Khu vực "Bài học & Câu hỏi đề xuất cho kỹ năng của bạn" */}
       <SkillRecommendationsSection
         selectedSkills={selectedSkills}
         globalLevel={globalLevel}

@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { UserPlus } from 'lucide-react';
+import { Loader2, UserPlus } from 'lucide-react';
+import { register } from '../../api/authApi.js';
+import { useToast } from '../../components/ToastProvider.jsx';
 import { LEVELS } from '../../data/tracks.mock.js';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const { notify } = useToast();
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -12,7 +15,7 @@ export default function RegisterPage() {
     targetLevel: 'Fresher',
   });
   const [errors, setErrors] = useState({});
-  const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const validateField = (name, value) => {
     if (name === 'fullName' && !value.trim()) {
@@ -46,7 +49,7 @@ export default function RegisterPage() {
     if (err) setErrors((prev) => ({ ...prev, [name]: err }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const newErrors = {
       fullName: validateField('fullName', formData.fullName),
@@ -57,30 +60,40 @@ export default function RegisterPage() {
       setErrors(newErrors);
       return;
     }
-    setSubmitted(true);
-    setTimeout(() => navigate('/tracks'), 600);
+
+    setIsSubmitting(true);
+    try {
+      const user = await register(formData);
+      notify({
+        title: 'Đăng ký tài khoản thành công!',
+        message: `Hồ sơ ${user.fullName} đã được thiết lập ở cấp độ ${user.targetLevel}.`,
+        type: 'success',
+      });
+      navigate('/tracks');
+    } catch (err) {
+      notify({
+        title: 'Không thể tạo tài khoản',
+        message: err.message,
+        type: 'error',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <article className="bg-white border border-slate-200/80 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
       <header className="space-y-1">
-        <h1 id="register-heading" className="text-2xl font-extrabold text-slate-900 tracking-tight">
+        <h1
+          id="register-heading"
+          className="text-2xl font-extrabold text-slate-900 tracking-tight"
+        >
           Đăng ký tài khoản ứng viên
         </h1>
         <p className="text-sm text-slate-600">
           Thiết lập mục tiêu phỏng vấn ban đầu để hệ thống gợi ý bộ câu hỏi phù hợp.
         </p>
       </header>
-
-      {submitted && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-800"
-        >
-          Khởi tạo tài khoản thành công! Đang chuyển tới Không gian Học tập...
-        </div>
-      )}
 
       <form
         aria-labelledby="register-heading"
@@ -211,10 +224,15 @@ export default function RegisterPage() {
 
         <button
           type="submit"
-          className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#0052FF] hover:bg-blue-700 text-white text-sm font-bold shadow-xs transition-colors"
+          disabled={isSubmitting}
+          className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#0052FF] hover:bg-blue-700 text-white text-sm font-bold shadow-xs transition-colors disabled:opacity-60"
         >
-          <UserPlus className="w-4 h-4" aria-hidden="true" />
-          <span>Hoàn tất đăng ký</span>
+          {isSubmitting ? (
+            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <UserPlus className="w-4 h-4" aria-hidden="true" />
+          )}
+          <span>{isSubmitting ? 'Đang khởi tạo...' : 'Hoàn tất đăng ký'}</span>
         </button>
       </form>
 

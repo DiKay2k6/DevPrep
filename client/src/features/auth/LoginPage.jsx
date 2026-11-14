@@ -1,16 +1,19 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight, Eye, EyeOff, LogIn, ShieldCheck, Zap } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff, Loader2, LogIn, ShieldCheck, Zap } from 'lucide-react';
+import { login, loginDemo } from '../../api/authApi.js';
+import { useToast } from '../../components/ToastProvider.jsx';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const { notify } = useToast();
   const [formData, setFormData] = useState({
     email: 'khang.nguyen.dev@gmail.com',
     password: 'Password@2026',
   });
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
-  const [statusMessage, setStatusMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const validateField = (name, value) => {
     if (name === 'email') {
@@ -42,7 +45,7 @@ export default function LoginPage() {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const emailError = validateField('email', formData.email);
     const passwordError = validateField('password', formData.password);
@@ -52,14 +55,45 @@ export default function LoginPage() {
       return;
     }
 
-    setStatusMessage(
-      'Xác thực thành công. Đang mở Không gian Học tập DevPrep...'
-    );
-    setTimeout(() => navigate('/tracks'), 500);
+    setIsSubmitting(true);
+    try {
+      const user = await login(formData);
+      notify({
+        title: `Chào mừng trở lại, ${user.fullName}!`,
+        message: 'Đã khôi phục tiến độ học tập và nhóm kỹ năng từ bộ nhớ.',
+        type: 'success',
+      });
+      navigate('/tracks');
+    } catch (err) {
+      notify({
+        title: 'Đăng nhập không thành công',
+        message: err.message,
+        type: 'error',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDemoLogin = () => {
-    navigate('/tracks');
+  const handleDemoLogin = async () => {
+    setIsSubmitting(true);
+    try {
+      const demoUser = await loginDemo();
+      notify({
+        title: 'Đã kích hoạt Tài khoản Demo',
+        message: `Đang đăng nhập với hồ sơ ${demoUser.fullName} (${demoUser.targetLevel}).`,
+        type: 'info',
+      });
+      navigate('/tracks');
+    } catch (err) {
+      notify({
+        title: 'Không thể khởi tạo phiên Demo',
+        message: err.message,
+        type: 'error',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -69,7 +103,10 @@ export default function LoginPage() {
           <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
           <span>Xác thực Tài khoản DevPrep</span>
         </div>
-        <h1 id="login-form-heading" className="text-2xl font-extrabold text-slate-900 tracking-tight">
+        <h1
+          id="login-form-heading"
+          className="text-2xl font-extrabold text-slate-900 tracking-tight"
+        >
           Đăng nhập vào hệ thống
         </h1>
         <p className="text-sm text-slate-600">
@@ -82,13 +119,14 @@ export default function LoginPage() {
         <div className="flex items-center justify-between text-xs">
           <span className="font-bold text-slate-800">Chế độ dùng thử nhanh</span>
           <span className="px-2 py-0.5 rounded-full bg-white text-[#0052FF] font-semibold border border-blue-200">
-            Fresher • 38/68 câu
+            Fresher • Sẵn dữ liệu mẫu
           </span>
         </div>
         <button
           type="button"
+          disabled={isSubmitting}
           onClick={handleDemoLogin}
-          className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-blue-50 text-[#0052FF] border border-blue-300 text-xs sm:text-sm font-bold shadow-2xs transition-colors"
+          className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-blue-50 text-[#0052FF] border border-blue-300 text-xs sm:text-sm font-bold shadow-2xs transition-colors disabled:opacity-60"
         >
           <Zap className="w-4 h-4 shrink-0" aria-hidden="true" />
           <span>Trải nghiệm nhanh với Tài khoản Demo</span>
@@ -103,16 +141,6 @@ export default function LoginPage() {
         </span>
         <div className="border-t border-slate-200 w-full" />
       </div>
-
-      {statusMessage && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-800"
-        >
-          {statusMessage}
-        </div>
-      )}
 
       <form
         aria-labelledby="login-form-heading"
@@ -216,10 +244,15 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#0052FF] hover:bg-blue-700 text-white text-sm font-bold shadow-xs transition-colors"
+          disabled={isSubmitting}
+          className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#0052FF] hover:bg-blue-700 text-white text-sm font-bold shadow-xs transition-colors disabled:opacity-60"
         >
-          <LogIn className="w-4 h-4" aria-hidden="true" />
-          <span>Đăng nhập vào DevPrep</span>
+          {isSubmitting ? (
+            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <LogIn className="w-4 h-4" aria-hidden="true" />
+          )}
+          <span>{isSubmitting ? 'Đang xác thực...' : 'Đăng nhập vào DevPrep'}</span>
         </button>
       </form>
 

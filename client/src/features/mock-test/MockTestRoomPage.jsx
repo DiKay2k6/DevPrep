@@ -1,35 +1,148 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Clock,
   Flag,
+  Loader2,
   Send,
-  Terminal,
+  Timer,
 } from 'lucide-react';
+import {
+  getActiveExamSessionSync,
+  saveActiveExamSessionSync,
+  submitMockExam,
+} from '../../api/mockTestApi.js';
+import { useToast } from '../../components/ToastProvider.jsx';
 import { MOCK_TEST_TEMPLATES } from '../../data/mockTest.mock.js';
-import { QUESTIONS_MOCK } from '../../data/questions.mock.js';
 import { cn } from '../../utils/cn.js';
+import { getStoredQuestions } from '../../utils/storage.js';
 
 export default function MockTestRoomPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { notify } = useToast();
 
-  const templateId = searchParams.get('templateId') || 'tpl_junior_fullstack';
+  const templateId = searchParams.get('templateId') || MOCK_TEST_TEMPLATES[1].id;
   const template =
     MOCK_TEST_TEMPLATES.find((t) => t.id === templateId) ||
     MOCK_TEST_TEMPLATES[1];
 
-  const examQuestions = QUESTIONS_MOCK.filter((q) =>
-    template.questionIds.includes(q._id)
-  );
+  const allQuestions = getStoredQuestions();
+  const examQuestions = template.questionIds
+    .map((id) => allQuestions.find((q) => q._id === id))
+    .filter(Boolean);
 
-  const [currentIdx, setCurrentIdx] = useState(0);
-  const [answers, setAnswers] = useState({});
-  const [flaggedIds, setFlaggedIds] = useState(['q_coding_longest_substr_08']);
+  const savedSession = getActiveExamSessionSync();
+  const isResumingSameTemplate =
+    savedSession && savedSession.templateId === template.id;
+
+  const totalDurationSeconds = template.durationMinutes * 60;
+  const [currentIdx, setCurrentIdx] = useState(() =>
+    isResumingSameTemplate ? savedSession.currentIdx || 0 : 0
+  );
+  const [flaggedIds, setFlaggedIds] = useState(() =>
+    isResumingSameTemplate ? savedSession.flaggedIds || [] : []
+  );
+  const [answersByQuestion, setAnswersByQuestion] = useState(() =>
+    isResumingSameTemplate ? savedSession.answersByQuestion || {} : {}
+  );
+  const [secondsLeft, setSecondsLeft] = useState(() =>
+    isResumingSameTemplate && typeof savedSession.secondsLeft === 'number'
+      ? savedSession.secondsLeft
+      : totalDurationSeconds
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const autoSubmittedRef = useRef(false);
 
   const currentQuestion = examQuestions[currentIdx] || examQuestions[0];
+
+  // Lưu tự động trạng thái ca thi vào localStorage mỗi khi thay đổi
+  useEffect(() => {
+    if (isSubmitting || secondsLeft <= 0) return;
+    saveActiveExamSessionSync({
+      templateId: template.id,
+      templateTitle: template.title,
+      currentIdx,
+      flaggedIds,
+      answersByQuestion,
+      secondsLeft,
+      updatedAt: Date.now(),
+    });
+  }, [
+    template.id,
+    template.title,
+    currentIdx,
+    flaggedIds,
+    answersByQuestion,
+    secondsLeft,
+    isSubmitting,
+  ]);
+
+  const handleFinishExam = useCallback(
+    async (isAutoTimeout = false) => {
+      if (autoSubmittedRef.current) return;
+      autoSubmittedRef.current = true;
+      setIsSubmitting(true);
+
+      const timeSpentSeconds = Math.max(
+        10,
+        totalDurationSeconds - Math.max(0, secondsLeft)
+      );
+
+      try {
+        const result = await submitMockExam({
+          templateId: template.id,
+          answersByQuestion,
+          timeSpentSeconds,
+        });
+        notify({
+          title: isAutoTimeout
+            ? 'Hết giờ! Hệ thống đã tự động thu bài'
+            : 'Đã nộp bài thi thử thành công!',
+          message: `Điểm tổng kết: ${result.scorePercent}% (${result.correctCount}/${result.totalQuestions} câu đúng).`,
+          type: result.scorePercent >= template.passingScore ? 'success' : 'info',
+        });
+        navigate('/mock-test/result');
+      } catch (err) {
+        autoSubmittedRef.current = false;
+        setIsSubmitting(false);
+        notify({
+          title: 'Lỗi khi nộp bài thi',
+          message: err.message,
+          type: 'error',
+        });
+      }
+    },
+    [
+      answersByQuestion,
+      navigate,
+      notify,
+      secondsLeft,
+      template.id,
+      template.passingScore,
+      totalDurationSeconds,
+    ]
+  );
+
+  // Đồng hồ đếm ngược thực tế (tự động thu bài khi chạm 00:00)
+  useEffect(() => {
+    if (secondsLeft <= 0) {
+      handleFinishExam(true);
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      setSecondsLeft((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [secondsLeft, handleFinishExam]);
+
+  const formatTimer = (secs) => {
+    const mins = Math.floor(secs / 60);
+    const rem = secs % 60;
+    return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+  };
 
   const toggleFlag = (qId) => {
     setFlaggedIds((prev) =>
@@ -37,89 +150,119 @@ export default function MockTestRoomPage() {
     );
   };
 
-  const handleSelectMcq = (qId, optId, isMultiple) => {
-    setAnswers((prev) => {
-      const current = prev[qId] || [];
-      if (isMultiple) {
-        const next = current.includes(optId)
-          ? current.filter((id) => id !== optId)
-          : [...current, optId];
-        return { ...prev, [qId]: next };
-      }
-      return { ...prev, [qId]: [optId] };
-    });
+  const isQuestionAnswered = (q) => {
+    const entry = answersByQuestion[q._id];
+    if (!entry) return false;
+    if (q.type === 'mcq') return (entry.selectedIds || []).length > 0;
+    if (q.type === 'fill_blank') return Boolean(String(entry.text || '').trim());
+    return Boolean(String(entry.code || '').trim());
   };
 
-  const handleTextAnswer = (qId, value) => {
-    setAnswers((prev) => ({ ...prev, [qId]: value }));
+  const currentAnswer = answersByQuestion[currentQuestion._id] || {};
+
+  const updateMcqOption = (optionId) => {
+    const isMultiple = currentQuestion.payload.isMultiple;
+    const prevIds = currentAnswer.selectedIds || [];
+    const nextIds = isMultiple
+      ? prevIds.includes(optionId)
+        ? prevIds.filter((id) => id !== optionId)
+        : [...prevIds, optionId]
+      : [optionId];
+
+    setAnswersByQuestion((prev) => ({
+      ...prev,
+      [currentQuestion._id]: { selectedIds: nextIds },
+    }));
   };
 
-  const isQuestionAnswered = (qId) => {
-    const val = answers[qId];
-    if (Array.isArray(val)) return val.length > 0;
-    if (typeof val === 'string') return val.trim().length > 0;
-    return false;
+  const updateFillBlank = (text) => {
+    setAnswersByQuestion((prev) => ({
+      ...prev,
+      [currentQuestion._id]: { text },
+    }));
   };
 
-  const answeredCount = examQuestions.filter((q) =>
-    isQuestionAnswered(q._id)
-  ).length;
+  const updateCodingAnswer = (field, val) => {
+    const defaultLang =
+      currentQuestion.payload.supportedLanguages?.[0] || 'javascript';
+    const currentLang = currentAnswer.language || defaultLang;
+    const defaultStarter =
+      currentQuestion.payload.starterCode?.[currentLang] || '';
+
+    setAnswersByQuestion((prev) => ({
+      ...prev,
+      [currentQuestion._id]: {
+        language: field === 'language' ? val : currentLang,
+        code:
+          field === 'code'
+            ? val
+            : field === 'language'
+              ? currentQuestion.payload.starterCode?.[val] || ''
+              : currentAnswer.code ?? defaultStarter,
+      },
+    }));
+  };
+
+  const answeredTotal = examQuestions.filter(isQuestionAnswered).length;
 
   return (
     <div className="space-y-5">
-      {/* Thanh trạng thái phòng thi & Đồng hồ đếm ngược */}
-      <section className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-0.5">
-          <span className="text-xs font-semibold text-blue-600 uppercase tracking-wider">
-            Phòng Thi Thử Đang Diễn Ra • {template.level} {template.track}
+      {/* Thanh trạng thái kỳ thi & Đồng hồ đếm ngược MM:SS */}
+      <header className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <span className="text-xs font-semibold text-blue-700">
+            Đang diễn ra kỳ thi thử • Đã làm {answeredTotal}/{examQuestions.length} câu
           </span>
           <h1 className="text-base sm:text-lg font-bold text-slate-900">
             {template.title}
           </h1>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-3">
           <div
             role="timer"
-            aria-label="Thời gian còn lại của bài thi"
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-mono text-sm font-bold"
+            aria-label="Thời gian làm bài còn lại"
+            className={cn(
+              'inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border font-mono text-sm font-bold',
+              secondsLeft < 300
+                ? 'bg-red-50 border-red-200 text-red-700'
+                : 'bg-slate-100 border-slate-200 text-slate-900'
+            )}
           >
-            <Clock className="w-4 h-4 text-amber-600" aria-hidden="true" />
-            <span>29:45</span>
+            <Timer
+              className="w-4 h-4 text-blue-600"
+              aria-hidden="true"
+            />
+            <span>{formatTimer(secondsLeft)}</span>
           </div>
-
-          <span className="text-xs font-medium text-slate-600 px-2">
-            Đã làm: <strong>{answeredCount}</strong> / {examQuestions.length}
-          </span>
 
           <button
             type="button"
-            onClick={() => navigate('/mock-test/result')}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold shadow-sm transition-colors"
+            disabled={isSubmitting}
+            onClick={() => handleFinishExam(false)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold shadow-sm transition-colors disabled:opacity-60"
           >
-            <Send className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Nộp bài thi</span>
+            {isSubmitting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <Send className="w-3.5 h-3.5" aria-hidden="true" />
+            )}
+            <span>{isSubmitting ? 'Đang chấm bài...' : 'Nộp bài sớm'}</span>
           </button>
         </div>
-      </section>
+      </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* Cột trái: Nội dung câu hỏi hiện tại */}
-        <article className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-5">
-          <header className="flex flex-wrap items-start justify-between gap-3 pb-4 border-b border-slate-200">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-                <span>
-                  Câu hỏi {currentIdx + 1} / {examQuestions.length}
-                </span>
-                <span>•</span>
-                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono">
-                  {currentQuestion.type}
-                </span>
-              </div>
-              <h2 className="text-lg font-bold text-slate-900">
-                {currentQuestion.title}
-              </h2>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Khung làm câu hỏi hiện tại */}
+        <section className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-200">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 font-bold">
+                Câu {currentIdx + 1} / {examQuestions.length}
+              </span>
+              <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 font-mono uppercase font-semibold">
+                {currentQuestion.type}
+              </span>
             </div>
 
             <button
@@ -127,7 +270,7 @@ export default function MockTestRoomPage() {
               aria-pressed={flaggedIds.includes(currentQuestion._id)}
               onClick={() => toggleFlag(currentQuestion._id)}
               className={cn(
-                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors',
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
                 flaggedIds.includes(currentQuestion._id)
                   ? 'bg-amber-50 text-amber-800 border-amber-300'
                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
@@ -136,125 +279,137 @@ export default function MockTestRoomPage() {
               <Flag className="w-3.5 h-3.5" aria-hidden="true" />
               <span>
                 {flaggedIds.includes(currentQuestion._id)
-                  ? 'Đã đánh dấu phân vân'
-                  : 'Đánh dấu phân vân'}
+                  ? 'Đã gắn cờ xem lại'
+                  : 'Gắn cờ xem lại'}
               </span>
             </button>
-          </header>
+          </div>
 
-          <p className="text-sm sm:text-base text-slate-800 leading-relaxed">
-            {currentQuestion.prompt}
-          </p>
+          <div className="space-y-3">
+            <h2 className="text-lg font-bold text-slate-900">
+              {currentQuestion.title}
+            </h2>
+            <p className="text-sm text-slate-700 leading-relaxed">
+              {currentQuestion.prompt}
+            </p>
+            {currentQuestion.codeSnippet && (
+              <pre className="p-4 rounded-xl bg-slate-900 text-slate-100 text-xs font-mono overflow-x-auto">
+                <code>{currentQuestion.codeSnippet}</code>
+              </pre>
+            )}
+          </div>
 
-          {currentQuestion.codeSnippet && (
-            <pre className="p-4 rounded-xl bg-slate-900 text-slate-100 text-xs sm:text-sm font-mono overflow-x-auto leading-relaxed">
-              <code>{currentQuestion.codeSnippet}</code>
-            </pre>
-          )}
-
-          {/* Vùng trả lời theo định dạng */}
+          {/* Vùng trả lời theo đúng định dạng câu hỏi */}
           {currentQuestion.type === 'mcq' && (
-            <fieldset className="space-y-2.5 pt-2">
-              <legend className="text-xs font-semibold text-slate-500 mb-2">
-                {currentQuestion.payload.isMultiple
-                  ? 'Chọn một hoặc nhiều đáp án đúng:'
-                  : 'Chọn 1 đáp án đúng nhất:'}
-              </legend>
-              {currentQuestion.payload.options.map((opt) => {
-                const selectedList = answers[currentQuestion._id] || [];
-                const checked = selectedList.includes(opt.id);
+            <div className="space-y-2.5 pt-2">
+              {currentQuestion.payload.options.map((opt, i) => {
+                const checked = (currentAnswer.selectedIds || []).includes(
+                  opt.id
+                );
                 return (
                   <label
                     key={opt.id}
-                    htmlFor={`exam-${currentQuestion._id}-${opt.id}`}
+                    htmlFor={`exam-opt-${opt.id}`}
                     className={cn(
-                      'flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-colors',
+                      'flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-colors',
                       checked
-                        ? 'border-blue-600 bg-blue-50/40'
-                        : 'border-slate-200 bg-white hover:border-slate-300'
+                        ? 'border-blue-600 bg-blue-50/50'
+                        : 'border-slate-200 hover:border-slate-300'
                     )}
                   >
                     <input
-                      id={`exam-${currentQuestion._id}-${opt.id}`}
+                      id={`exam-opt-${opt.id}`}
                       type={
                         currentQuestion.payload.isMultiple
                           ? 'checkbox'
                           : 'radio'
                       }
-                      name={`exam-${currentQuestion._id}`}
+                      name={`exam-q-${currentQuestion._id}`}
                       checked={checked}
-                      onChange={() =>
-                        handleSelectMcq(
-                          currentQuestion._id,
-                          opt.id,
-                          currentQuestion.payload.isMultiple
-                        )
-                      }
-                      className="mt-0.5 w-4 h-4 accent-blue-600 shrink-0"
+                      onChange={() => updateMcqOption(opt.id)}
+                      className="mt-0.5 accent-blue-600"
                     />
-                    <span className="text-sm text-slate-800">{opt.text}</span>
+                    <span className="text-sm text-slate-800">
+                      <strong className="font-mono mr-1.5">
+                        {String.fromCharCode(65 + i)}.
+                      </strong>
+                      {opt.text}
+                    </span>
                   </label>
                 );
               })}
-            </fieldset>
+            </div>
           )}
 
           {currentQuestion.type === 'fill_blank' && (
             <div className="space-y-2 pt-2">
               <label
-                htmlFor={`exam-fill-${currentQuestion._id}`}
-                className="block text-sm font-semibold text-slate-800"
+                htmlFor="exam-fill-input"
+                className="block text-xs font-semibold text-slate-700"
               >
-                Nhập đáp án của bạn:
+                Nhập đáp án hoặc Output dự đoán:
               </label>
               <input
-                id={`exam-fill-${currentQuestion._id}`}
+                id="exam-fill-input"
                 type="text"
-                value={answers[currentQuestion._id] || ''}
-                onChange={(e) =>
-                  handleTextAnswer(currentQuestion._id, e.target.value)
-                }
+                value={currentAnswer.text || ''}
+                onChange={(e) => updateFillBlank(e.target.value)}
                 placeholder={currentQuestion.payload.placeholder}
-                className="w-full min-h-[48px] px-4 py-2.5 rounded-xl border border-slate-300 font-mono text-sm text-slate-900"
+                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 font-mono text-sm text-slate-900 focus:border-blue-600"
               />
             </div>
           )}
 
           {currentQuestion.type === 'coding' && (
-            <div className="space-y-2 pt-2">
-              <div className="flex items-center justify-between text-xs text-slate-600">
+            <div className="space-y-2.5 pt-2">
+              <div className="flex items-center justify-between gap-2">
                 <label
-                  htmlFor={`exam-code-${currentQuestion._id}`}
-                  className="font-semibold inline-flex items-center gap-1.5"
+                  htmlFor="exam-code-area"
+                  className="text-xs font-semibold text-slate-700"
                 >
-                  <Terminal className="w-3.5 h-3.5 text-blue-600" aria-hidden="true" />
-                  <span>Lời giải JavaScript (Function: {currentQuestion.payload.functionName}):</span>
+                  Viết hàm giải quyết bài toán ({currentQuestion.payload.functionName}):
                 </label>
-                <span className="font-mono text-slate-500">
-                  Chấm toàn bộ Test Cases khi nộp đề
-                </span>
+                <select
+                  aria-label="Ngôn ngữ lập trình"
+                  value={
+                    currentAnswer.language ||
+                    currentQuestion.payload.supportedLanguages?.[0] ||
+                    'javascript'
+                  }
+                  onChange={(e) => updateCodingAnswer('language', e.target.value)}
+                  className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-800"
+                >
+                  {(currentQuestion.payload.supportedLanguages || ['javascript']).map(
+                    (lang) => (
+                      <option key={lang} value={lang}>
+                        {lang.toUpperCase()}
+                      </option>
+                    )
+                  )}
+                </select>
               </div>
               <textarea
-                id={`exam-code-${currentQuestion._id}`}
-                rows={9}
+                id="exam-code-area"
+                rows={7}
                 value={
-                  answers[currentQuestion._id] ??
-                  currentQuestion.payload.starterCode.javascript
+                  currentAnswer.code ??
+                  currentQuestion.payload.starterCode?.[
+                    currentAnswer.language || 'javascript'
+                  ] ??
+                  ''
                 }
-                onChange={(e) =>
-                  handleTextAnswer(currentQuestion._id, e.target.value)
-                }
-                className="w-full p-4 rounded-xl border border-slate-300 bg-slate-50 font-mono text-xs sm:text-sm text-slate-900 leading-relaxed"
+                onChange={(e) => updateCodingAnswer('code', e.target.value)}
+                className="w-full p-3.5 rounded-xl border border-slate-300 bg-slate-900 text-slate-100 font-mono text-xs leading-relaxed focus:border-blue-600"
               />
             </div>
           )}
 
-          <footer className="pt-4 border-t border-slate-200 flex items-center justify-between">
+          <div className="flex items-center justify-between pt-4 border-t border-slate-200">
             <button
               type="button"
               disabled={currentIdx === 0}
               onClick={() => setCurrentIdx((i) => Math.max(0, i - 1))}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs font-semibold text-slate-700"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs font-semibold text-slate-700"
             >
               <ChevronLeft className="w-4 h-4" aria-hidden="true" />
               <span>Câu trước</span>
@@ -266,70 +421,63 @@ export default function MockTestRoomPage() {
               onClick={() =>
                 setCurrentIdx((i) => Math.min(examQuestions.length - 1, i + 1))
               }
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-xs font-semibold"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-xs font-semibold text-white"
             >
               <span>Câu tiếp theo</span>
               <ChevronRight className="w-4 h-4" aria-hidden="true" />
             </button>
-          </footer>
-        </article>
+          </div>
+        </section>
 
-        {/* Cột phải: Bảng điều hướng danh sách câu hỏi */}
-        <aside
-          aria-label="Bảng điều hướng danh sách câu hỏi trong đề thi"
-          className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4 lg:sticky lg:top-20"
-        >
+        {/* Bảng điều hướng câu hỏi bên phải */}
+        <aside className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-900">
-            Bảng Điều hướng Câu hỏi ({examQuestions.length})
+            Danh sách câu hỏi trong đề ({examQuestions.length})
           </h2>
 
-          <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-3 gap-2">
+          <div className="grid grid-cols-5 gap-2">
             {examQuestions.map((q, idx) => {
-              const isCurrent = idx === currentIdx;
-              const answered = isQuestionAnswered(q._id);
-              const flagged = flaggedIds.includes(q._id);
+              const active = idx === currentIdx;
+              const isFlagged = flaggedIds.includes(q._id);
+              const isDone = isQuestionAnswered(q);
 
               return (
                 <button
                   key={q._id}
                   type="button"
                   onClick={() => setCurrentIdx(idx)}
-                  aria-current={isCurrent ? 'step' : undefined}
+                  aria-label={`Chuyển tới câu ${idx + 1}`}
                   className={cn(
-                    'p-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center gap-1 transition-colors',
-                    isCurrent
-                      ? 'border-blue-600 bg-blue-50 text-blue-800 ring-2 ring-blue-600/20'
-                      : answered
-                        ? 'border-emerald-300 bg-emerald-50/70 text-emerald-800'
-                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                    'h-10 rounded-xl font-mono text-xs font-bold border transition-all relative flex items-center justify-center',
+                    active
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : isFlagged
+                        ? 'bg-amber-50 text-amber-900 border-amber-300'
+                        : isDone
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                   )}
                 >
-                  <span>Câu {idx + 1}</span>
-                  <span className="text-[10px] font-normal text-slate-500 uppercase">
-                    {q.type === 'fill_blank' ? 'Output' : q.type}
-                  </span>
-                  {flagged && (
-                    <span className="text-[10px] text-amber-700 font-bold">
-                      ★ Phân vân
-                    </span>
-                  )}
+                  <span>{idx + 1}</span>
                 </button>
               );
             })}
           </div>
 
-          <dl className="pt-3 border-t border-slate-100 space-y-1.5 text-xs text-slate-600">
-            <div className="flex items-center justify-between">
-              <dt>Đã trả lời:</dt>
-              <dd className="font-semibold text-emerald-700">{answeredCount} câu</dd>
+          <div className="pt-3 border-t border-slate-100 space-y-2 text-xs text-slate-600">
+            <div className="flex items-center gap-2">
+              <CheckCircle2
+                className="w-3.5 h-3.5 text-emerald-600"
+                aria-hidden="true"
+              />
+              <span>
+                Đã trả lời: <strong>{answeredTotal}</strong> / {examQuestions.length} câu
+              </span>
             </div>
-            <div className="flex items-center justify-between">
-              <dt>Đang đánh dấu phân vân:</dt>
-              <dd className="font-semibold text-amber-700">
-                {flaggedIds.length} câu
-              </dd>
-            </div>
-          </dl>
+            <p className="text-[11px] text-slate-500">
+              Trạng thái ca thi đang được lưu tự động vào <code>localStorage</code>.
+            </p>
+          </div>
         </aside>
       </div>
     </div>
