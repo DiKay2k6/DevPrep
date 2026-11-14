@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: light;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: #f4f7fa;
+    line-height: 1.5;
+    text-align: start;
+    overflow-wrap: break-word;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+
+  p,
+  blockquote,
+  li {
+    text-wrap: pretty;
+  }
+
+  :where(a:any-link, button, input, select, textarea):focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+}
+
+/* Tiện ích ẩn trực quan nhưng giữ trong cây Accessibility */
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+}
+
+/* Scrollbar gọn và ổn định cho các vùng cuộn lồng nhau */
+.scrollable-region {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+/* Chặn cuộn trang nền phía sau hộp thoại modal (<dialog>) theo chuẩn modern-web-guidance */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(3px);
+}
+
+/* Nền xanh #0052FF kèm vòng đồng tâm tinh tế cho trang Landing Page */
+.landing-hero-surface {
+  background-color: #0052ff;
+  background-image:
+    radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.14) 0, rgba(255, 255, 255, 0.04) 220px, transparent 222px),
+    radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.1) 0, rgba(255, 255, 255, 0.03) 380px, transparent 382px),
+    radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.07) 0, rgba(255, 255, 255, 0.02) 540px, transparent 542px),
+    radial-gradient(circle at 50% 25%, #1e6bff 0%, #0052ff 58%, #003ecb 100%);
+}
