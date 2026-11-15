@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { ToastProvider } from './components/ToastProvider.jsx';
+import { getCurrentUser, updateProfile } from './api/authApi.js';
+import { ToastProvider, useToast } from './components/ToastProvider.jsx';
 import AuthLayout from './layouts/AuthLayout.jsx';
 import LandingLayout from './layouts/LandingLayout.jsx';
 import MainLayout from './layouts/MainLayout.jsx';
@@ -23,10 +24,49 @@ import AdminModerationPage from './features/admin/AdminModerationPage.jsx';
 import {
   getStoredSelectedSkills,
   getStoredTargetLevel,
+  getStoredUser,
   setStoredSelectedSkills,
   setStoredTargetLevel,
   subscribeStorageSync,
 } from './utils/storage.js';
+
+export function AdminRoute({ children }) {
+  const { notify } = useToast();
+  const [user, setUser] = useState(() => getStoredUser());
+  const notifiedRef = useRef(false);
+
+  useEffect(() => {
+    return subscribeStorageSync(() => {
+      setUser(getStoredUser());
+    });
+  }, []);
+
+  const isAdmin = user && user.role === 'admin';
+
+  useEffect(() => {
+    if (!isAdmin && !notifiedRef.current) {
+      notifiedRef.current = true;
+      notify({
+        title: 'Truy cập bị từ chối (RBAC)',
+        message:
+          'Chỉ tài khoản Quản trị viên (role: admin) mới được phép truy cập trang Kiểm duyệt.',
+        type: 'error',
+      });
+    }
+  }, [isAdmin, notify]);
+
+  if (!isAdmin) {
+    return <Navigate to="/tracks" replace />;
+  }
+
+  return children;
+}
+
+const areStringArraysEqual = (a, b) =>
+  Array.isArray(a) &&
+  Array.isArray(b) &&
+  a.length === b.length &&
+  a.every((item, idx) => item === b[idx]);
 
 export default function App() {
   const [globalLevel, setGlobalLevelState] = useState(() =>
@@ -36,11 +76,38 @@ export default function App() {
     getStoredSelectedSkills()
   );
 
+  const didBootstrapAuthRef = useRef(false);
+
+  // Đồng bộ hồ sơ người dùng thật từ MongoDB (GET /api/v1/auth/me) đúng 1 lần khi khởi động app
+  useEffect(() => {
+    if (didBootstrapAuthRef.current) return;
+    didBootstrapAuthRef.current = true;
+
+    getCurrentUser().then((user) => {
+      if (!user) return;
+      if (user.targetLevel) {
+        setGlobalLevelState((prev) =>
+          prev === user.targetLevel ? prev : user.targetLevel
+        );
+      }
+      if (Array.isArray(user.selectedSkills)) {
+        setSelectedSkillsState((prev) =>
+          areStringArraysEqual(prev, user.selectedSkills)
+            ? prev
+            : user.selectedSkills
+        );
+      }
+    });
+  }, []);
+
   const setGlobalLevel = useCallback((nextLevel) => {
     setGlobalLevelState((prev) => {
       const resolved =
         typeof nextLevel === 'function' ? nextLevel(prev) : nextLevel;
       setStoredTargetLevel(resolved);
+      if (resolved && resolved !== 'All' && getStoredUser()) {
+        updateProfile({ targetLevel: resolved }).catch(() => {});
+      }
       return resolved;
     });
   }, []);
@@ -50,14 +117,21 @@ export default function App() {
       const resolved =
         typeof nextSkills === 'function' ? nextSkills(prev) : nextSkills;
       setStoredSelectedSkills(resolved);
-      return resolved;
+      if (getStoredUser()) {
+        updateProfile({ selectedSkills: resolved }).catch(() => {});
+      }
+      return areStringArraysEqual(prev, resolved) ? prev : resolved;
     });
   }, []);
 
   useEffect(() => {
     return subscribeStorageSync(() => {
-      setGlobalLevelState(getStoredTargetLevel());
-      setSelectedSkillsState(getStoredSelectedSkills());
+      const nextLevel = getStoredTargetLevel();
+      const nextSkills = getStoredSelectedSkills();
+      setGlobalLevelState((prev) => (prev === nextLevel ? prev : nextLevel));
+      setSelectedSkillsState((prev) =>
+        areStringArraysEqual(prev, nextSkills) ? prev : nextSkills
+      );
     });
   }, []);
 
@@ -96,7 +170,14 @@ export default function App() {
             <Route path="mock-test/room" element={<MockTestRoomPage />} />
             <Route path="mock-test/result" element={<MockTestResultPage />} />
             <Route path="analytics" element={<AnalyticsDashboardPage />} />
-            <Route path="admin" element={<AdminModerationPage />} />
+            <Route
+              path="admin"
+              element={
+                <AdminRoute>
+                  <AdminModerationPage />
+                </AdminRoute>
+              }
+            />
           </Route>
 
           {/* Trang đọc tài liệu tập trung dùng ReaderLayout */}

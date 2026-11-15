@@ -12,10 +12,14 @@ import { cn } from '../../utils/cn.js';
 
 export default function FillBlankPanel({ question, onAttemptComplete }) {
   const { notify } = useToast();
-  const { placeholder, caseSensitive, acceptedAnswers } = question.payload;
+  const { placeholder, caseSensitive, acceptedAnswers } =
+    question.payload || {};
   const [answerText, setAnswerText] = useState('');
   const [evaluation, setEvaluation] = useState(null);
   const [isEvaluating, setIsEvaluating] = useState(false);
+
+  const revealedAcceptedAnswers =
+    evaluation?.acceptedAnswers || acceptedAnswers || [];
 
   useEffect(() => {
     setAnswerText('');
@@ -180,13 +184,14 @@ export default function FillBlankPanel({ question, onAttemptComplete }) {
             <div className="p-2.5 rounded-lg bg-white border border-slate-200">
               <span className="text-slate-500 block">Đáp án được chấp nhận:</span>
               <code className="font-mono font-semibold text-emerald-700">
-                {acceptedAnswers.join('  hoặc  ')}
+                {revealedAcceptedAnswers.join('  hoặc  ')}
               </code>
             </div>
           </div>
 
           <p className="text-xs sm:text-sm text-slate-700 leading-relaxed pt-1">
-            <strong>Giải thích:</strong> {question.explanation}
+            <strong>Giải thích:</strong>{' '}
+            {evaluation.explanation || question.explanation}
           </p>
         </div>
       )}

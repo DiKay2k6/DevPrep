@@ -24,7 +24,10 @@ import {
   MOCK_USER_PROFILE,
 } from '../../data/tracks.mock.js';
 import { cn } from '../../utils/cn.js';
-import { getSolvedQuestionIds } from '../../utils/storage.js';
+import {
+  getSolvedQuestionIds,
+  subscribeStorageSync,
+} from '../../utils/storage.js';
 import SkillRecommendationsSection from './SkillRecommendationsSection.jsx';
 
 const TRACK_VISUALS = {
@@ -84,7 +87,15 @@ export default function HomeTracksPage() {
   const [recommendedQuestions, setRecommendedQuestions] = useState([]);
 
   const activeLevelForRoadmap = globalLevel === 'All' ? 'Junior' : globalLevel;
-  const solvedCount = Math.max(getSolvedQuestionIds().length, 38);
+  const [solvedCount, setSolvedCount] = useState(
+    () => getSolvedQuestionIds().length
+  );
+
+  useEffect(() => {
+    return subscribeStorageSync(() => {
+      setSolvedCount(getSolvedQuestionIds().length);
+    });
+  }, []);
 
   useEffect(() => {
     let mounted = true;

@@ -9,11 +9,13 @@ import {
   RotateCcw,
   XCircle,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { getLastMockResult } from '../../api/mockTestApi.js';
-import { LoadingSkeleton } from '../../components/UiStates.jsx';
+import { EmptyState, LoadingSkeleton } from '../../components/UiStates.jsx';
 import { cn } from '../../utils/cn.js';
 
 export default function MockTestResultPage() {
+  const navigate = useNavigate();
   const [r, setResult] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -31,8 +33,19 @@ export default function MockTestResultPage() {
     };
   }, []);
 
-  if (loading || !r) {
+  if (loading) {
     return <LoadingSkeleton rows={3} label="Đang tải biên bản chấm điểm..." />;
+  }
+
+  if (!r) {
+    return (
+      <EmptyState
+        title="Chưa có biên bản ca thi thử nào"
+        description="Bạn chưa nộp đề thi thử nào trong phiên này. Hãy chọn một đề thi chuẩn đầu ra để bắt đầu làm bài."
+        actionLabel="Vào Phòng Thi Thử"
+        onAction={() => navigate('/mock-test')}
+      />
+    );
   }
 
   const mins = Math.floor(r.timeSpentSeconds / 60);

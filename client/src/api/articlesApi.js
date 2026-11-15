@@ -1,79 +1,68 @@
-import { ARTICLES_MOCK } from '../data/articles.mock.js';
 import {
   getCompletedArticleIds,
-  getStoredQuestions,
   setCompletedArticleIds,
 } from '../utils/storage.js';
-import { simulateApiCall } from './axiosClient.js';
+import axiosClient from './axiosClient.js';
 
 export async function getArticles(filters = {}) {
-  return simulateApiCall(() => {
-    const completedIds = getCompletedArticleIds();
-    const {
-      level = 'All',
-      category = 'All',
-      onlyMySkills = false,
-      selectedSkills = [],
-      searchQuery = '',
-    } = filters;
+  const {
+    level = 'All',
+    category = 'All',
+    onlyMySkills = false,
+    selectedSkills = [],
+    searchQuery = '',
+  } = filters;
 
-    const q = String(searchQuery || '').trim().toLowerCase();
+  const params = {};
+  if (level && level !== 'All') params.level = level;
+  if (category && category !== 'All') params.category = category;
+  if (onlyMySkills) {
+    if (Array.isArray(selectedSkills) && selectedSkills.length > 0) {
+      params.skills = selectedSkills.join(',');
+    } else {
+      params.matchMySkills = 'true';
+    }
+  }
+  if (searchQuery && searchQuery.trim()) {
+    params.q = searchQuery.trim();
+  }
 
-    return ARTICLES_MOCK.filter((article) => {
-      const matchLevel = level === 'All' || article.level === level;
-      const matchCat = category === 'All' || article.category === category;
-      const matchSkills =
-        !onlyMySkills ||
-        selectedSkills.length === 0 ||
-        article.tags.some((t) => selectedSkills.includes(t));
-      const matchQuery =
-        !q ||
-        article.title.toLowerCase().includes(q) ||
-        article.summary.toLowerCase().includes(q) ||
-        article.tags.some((t) => t.toLowerCase().includes(q));
-      return matchLevel && matchCat && matchSkills && matchQuery;
-    }).map((art) => ({
-      ...art,
-      isCompleted: completedIds.includes(art._id),
-    }));
-  }, 100);
+  const res = await axiosClient.get('/articles', { params });
+  const localCompletedIds = getCompletedArticleIds();
+  const items = Array.isArray(res.data) ? res.data : [];
+
+  return items.map((art) => ({
+    ...art,
+    isCompleted:
+      Boolean(art.isCompleted) || localCompletedIds.includes(art._id),
+  }));
 }
 
 export async function getArticleBySlug(slug) {
-  return simulateApiCall(() => {
-    const completedIds = getCompletedArticleIds();
-    const allQuestions = getStoredQuestions();
-    const article =
-      ARTICLES_MOCK.find((item) => item.slug === slug) || ARTICLES_MOCK[0];
+  const res = await axiosClient.get(`/articles/${encodeURIComponent(slug)}`);
+  const localCompletedIds = getCompletedArticleIds();
+  const article = res.data;
 
-    const relatedQuestions = allQuestions.filter(
-      (q) =>
-        q.status === 'approved' &&
-        (article.questionIds.includes(q._id) ||
-          q.relatedArticleId === article._id)
-    );
-
-    return {
-      ...article,
-      isCompleted: completedIds.includes(article._id),
-      relatedQuestions,
-    };
-  }, 100);
+  return {
+    ...article,
+    isCompleted:
+      Boolean(article?.isCompleted) || localCompletedIds.includes(article?._id),
+  };
 }
 
 export async function toggleArticleCompleted(articleId) {
-  return simulateApiCall(() => {
+  const res = await axiosClient.post(
+    `/articles/${encodeURIComponent(articleId)}/complete`
+  );
+  const data = res.data;
+  if (Array.isArray(data?.completedArticleIds)) {
+    setCompletedArticleIds(data.completedArticleIds);
+  } else {
     const current = getCompletedArticleIds();
-    const exists = current.includes(articleId);
-    const updated = exists
-      ? current.filter((id) => id !== articleId)
-      : [...current, articleId];
-
-    setCompletedArticleIds(updated);
-    return {
-      articleId,
-      isCompleted: !exists,
-      totalCompleted: updated.length,
-    };
-  }, 90);
+    const next = data?.isCompleted
+      ? [...new Set([...current, articleId])]
+      : current.filter((id) => id !== articleId);
+    setCompletedArticleIds(next);
+  }
+  return data;
 }

@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff, Loader2, LogIn, ShieldCheck, Zap } from 'lucide-react';
-import { login, loginDemo } from '../../api/authApi.js';
+import { login, loginDemo, loginQuickAdmin } from '../../api/authApi.js';
 import { useToast } from '../../components/ToastProvider.jsx';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const { notify } = useToast();
   const [formData, setFormData] = useState({
-    email: 'khang.nguyen.dev@gmail.com',
-    password: 'Password@2026',
+    email: '',
+    password: '',
   });
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
@@ -60,7 +60,7 @@ export default function LoginPage() {
       const user = await login(formData);
       notify({
         title: `Chào mừng trở lại, ${user.fullName}!`,
-        message: 'Đã khôi phục tiến độ học tập và nhóm kỹ năng từ bộ nhớ.',
+        message: 'Đã đồng bộ hồ sơ cá nhân và nhóm kỹ năng từ máy chủ.',
         type: 'success',
       });
       navigate('/tracks');
@@ -76,18 +76,49 @@ export default function LoginPage() {
   };
 
   const handleDemoLogin = async () => {
+    setFormData({
+      email: 'demo@devprep.vn',
+      password: 'DevPrep@2026',
+    });
+    setErrors({});
     setIsSubmitting(true);
     try {
       const demoUser = await loginDemo();
       notify({
-        title: 'Đã kích hoạt Tài khoản Demo',
-        message: `Đang đăng nhập với hồ sơ ${demoUser.fullName} (${demoUser.targetLevel}).`,
+        title: 'Đã đăng nhập Tài khoản Demo User',
+        message: `Đang sử dụng hồ sơ ${demoUser.fullName} (${demoUser.targetLevel}).`,
         type: 'info',
       });
       navigate('/tracks');
     } catch (err) {
       notify({
-        title: 'Không thể khởi tạo phiên Demo',
+        title: 'Không thể đăng nhập Demo User',
+        message: err.message,
+        type: 'error',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAdminQuickLogin = async () => {
+    setFormData({
+      email: 'admin@devprep.vn',
+      password: 'Admin@2026',
+    });
+    setErrors({});
+    setIsSubmitting(true);
+    try {
+      const adminUser = await loginQuickAdmin();
+      notify({
+        title: 'Đã đăng nhập Tài khoản Quản trị (Admin)',
+        message: `Xin chào ${adminUser.fullName} — Đã mở khóa quyền Kiểm duyệt câu hỏi.`,
+        type: 'success',
+      });
+      navigate('/tracks');
+    } catch (err) {
+      notify({
+        title: 'Không thể đăng nhập Admin',
         message: err.message,
         type: 'error',
       });
@@ -114,24 +145,36 @@ export default function LoginPage() {
         </p>
       </header>
 
-      {/* Nút vào thẳng HUB nội bộ cho nhà tuyển dụng / người dùng thử */}
-      <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 space-y-2">
+      {/* Cụm nút đăng nhập nhanh phục vụ kiểm thử Demo User & Admin */}
+      <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 space-y-2.5">
         <div className="flex items-center justify-between text-xs">
-          <span className="font-bold text-slate-800">Chế độ dùng thử nhanh</span>
+          <span className="font-bold text-slate-800">Đăng nhập nhanh (Seed Accounts)</span>
           <span className="px-2 py-0.5 rounded-full bg-white text-[#0052FF] font-semibold border border-blue-200">
-            Fresher • Sẵn dữ liệu mẫu
+            MongoDB Port 5001
           </span>
         </div>
-        <button
-          type="button"
-          disabled={isSubmitting}
-          onClick={handleDemoLogin}
-          className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-blue-50 text-[#0052FF] border border-blue-300 text-xs sm:text-sm font-bold shadow-2xs transition-colors disabled:opacity-60"
-        >
-          <Zap className="w-4 h-4 shrink-0" aria-hidden="true" />
-          <span>Trải nghiệm nhanh với Tài khoản Demo</span>
-          <ArrowRight className="w-4 h-4 shrink-0" aria-hidden="true" />
-        </button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={isSubmitting}
+            onClick={handleDemoLogin}
+            className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-blue-50 text-[#0052FF] border border-blue-300 text-xs font-bold shadow-2xs transition-colors disabled:opacity-60"
+          >
+            <Zap className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span>Đăng nhập nhanh Demo User</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={isSubmitting}
+            onClick={handleAdminQuickLogin}
+            className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white border border-slate-900 text-xs font-bold shadow-2xs transition-colors disabled:opacity-60"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span>Đăng nhập nhanh Admin</span>
+            <ArrowRight className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
       <div className="relative flex items-center justify-center">

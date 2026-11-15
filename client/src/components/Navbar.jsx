@@ -18,7 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { logout } from '../api/authApi.js';
-import { LEVELS, MOCK_USER } from '../data/tracks.mock.js';
+import { LEVELS } from '../data/tracks.mock.js';
 import { cn } from '../utils/cn.js';
 import {
   getSolvedQuestionIds,
@@ -29,16 +29,47 @@ import {
 import { useToast } from './ToastProvider.jsx';
 
 export const NAV_ITEMS = [
-  { to: '/tracks', label: 'Lộ trình & Chuyên ngành', shortLabel: 'Lộ trình', icon: Compass },
-  { to: '/study-hub', label: 'Kho Tài liệu', shortLabel: 'Tài liệu', icon: BookOpen },
-  { to: '/practice', label: 'Phòng Luyện tập', shortLabel: 'Luyện tập', icon: Code2 },
-  { to: '/mock-test', label: 'Phòng Thi thử', shortLabel: 'Thi thử', icon: Timer },
-  { to: '/analytics', label: 'Phân tích Năng lực', shortLabel: 'Phân tích', icon: BarChart3 },
-  { to: '/admin', label: 'Duyệt Đóng góp', shortLabel: 'Quản trị', icon: ShieldCheck },
+  {
+    to: '/tracks',
+    label: 'Lộ trình & Chuyên ngành',
+    shortLabel: 'Lộ trình',
+    icon: Compass,
+  },
+  {
+    to: '/study-hub',
+    label: 'Kho Tài liệu',
+    shortLabel: 'Tài liệu',
+    icon: BookOpen,
+  },
+  {
+    to: '/practice',
+    label: 'Phòng Luyện tập',
+    shortLabel: 'Luyện tập',
+    icon: Code2,
+  },
+  {
+    to: '/mock-test',
+    label: 'Phòng Thi thử',
+    shortLabel: 'Thi thử',
+    icon: Timer,
+  },
+  {
+    to: '/analytics',
+    label: 'Phân tích Năng lực',
+    shortLabel: 'Phân tích',
+    icon: BarChart3,
+  },
+  {
+    to: '/admin',
+    label: 'Duyệt Đóng góp',
+    shortLabel: 'Quản trị',
+    icon: ShieldCheck,
+    adminOnly: true,
+  },
 ];
 
 function getInitials(name) {
-  const parts = String(name || 'Ứng viên')
+  const parts = String(name || 'UV')
     .trim()
     .split(/\s+/);
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
@@ -73,9 +104,10 @@ export default function Navbar({
 
   const displaySolved = Math.max(
     solvedCount,
-    user?.stats?.solvedQuestions || 38
+    user?.stats?.solvedQuestions || 0
   );
-  const isAuthenticated = user?.isAuthenticated !== false;
+  const displayStreak = user?.streakDays || user?.stats?.streakDays || 1;
+  const isAuthenticated = Boolean(user && user.isAuthenticated !== false);
 
   return (
     <header className="sticky top-0 z-40 h-16 bg-white/95 backdrop-blur border-b border-slate-200/80 px-3 sm:px-5">
@@ -94,7 +126,9 @@ export default function Navbar({
             onClick={onToggleSidebar}
             aria-expanded={sidebarExpanded}
             aria-label={
-              sidebarExpanded ? 'Thu gọn thanh điều hướng bên' : 'Mở rộng thanh điều hướng bên'
+              sidebarExpanded
+                ? 'Thu gọn thanh điều hướng bên'
+                : 'Mở rộng thanh điều hướng bên'
             }
             className="hidden lg:inline-flex items-center justify-center w-10 h-10 rounded-full bg-[#F4F7FA] hover:bg-slate-200/70 text-slate-700 transition-colors shrink-0"
           >
@@ -106,7 +140,11 @@ export default function Navbar({
             onClick={onToggleMobileDrawer}
             aria-expanded={mobileDrawerOpen}
             aria-controls="mobile-nav-drawer"
-            aria-label={mobileDrawerOpen ? 'Đóng menu điều hướng' : 'Mở menu điều hướng'}
+            aria-label={
+              mobileDrawerOpen
+                ? 'Đóng menu điều hướng'
+                : 'Mở menu điều hướng'
+            }
             className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-full bg-[#F4F7FA] hover:bg-slate-200/70 text-slate-700 transition-colors shrink-0"
           >
             {mobileDrawerOpen ? (
@@ -166,9 +204,14 @@ export default function Navbar({
             to="/analytics"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 hover:bg-amber-100/80 border border-amber-200/80 text-xs font-bold text-amber-700 transition-colors"
           >
-            <Flame className="w-4 h-4 text-amber-500 fill-amber-500" aria-hidden="true" />
-            <span>{user?.stats?.streakDays || MOCK_USER.stats.streakDays}</span>
-            <span className="hidden sm:inline font-semibold text-amber-800">ngày</span>
+            <Flame
+              className="w-4 h-4 text-amber-500 fill-amber-500"
+              aria-hidden="true"
+            />
+            <span>{displayStreak}</span>
+            <span className="hidden sm:inline font-semibold text-amber-800">
+              ngày
+            </span>
           </Link>
 
           <Link
@@ -176,7 +219,7 @@ export default function Navbar({
             className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-50/80 hover:bg-blue-100/70 border border-blue-200/70 text-xs font-bold text-blue-700 transition-colors"
           >
             <Trophy className="w-3.5 h-3.5 text-blue-600" aria-hidden="true" />
-            <span>{displaySolved}/68 câu</span>
+            <span>{displaySolved}/16 câu</span>
           </Link>
 
           <Link
@@ -201,11 +244,16 @@ export default function Navbar({
               className="inline-flex items-center gap-2 pl-1 pr-1 sm:pr-3 py-1 rounded-full bg-[#F4F7FA] hover:bg-slate-200/70 border border-slate-200/80 transition-colors"
             >
               <span className="w-7 h-7 rounded-full bg-blue-600 text-white text-xs font-bold inline-flex items-center justify-center">
-                {getInitials(user?.fullName || MOCK_USER.fullName)}
+                {getInitials(user.fullName)}
               </span>
-              <span className="hidden md:inline text-xs font-semibold text-slate-800 max-w-[115px] truncate">
-                {user?.fullName || MOCK_USER.fullName}
+              <span className="hidden md:inline text-xs font-semibold text-slate-800 max-w-[125px] truncate">
+                {user.fullName}
               </span>
+              {user.role === 'admin' && (
+                <span className="hidden lg:inline px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-[10px] font-bold">
+                  ADMIN
+                </span>
+              )}
             </Link>
           ) : (
             <Link
@@ -236,13 +284,16 @@ export function LeftNavigationRail({
     return subscribeStorageSync(sync);
   }, []);
 
-  const isAuthenticated = user?.isAuthenticated !== false;
+  const isAuthenticated = Boolean(user && user.isAuthenticated !== false);
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) => !item.adminOnly || user?.role === 'admin'
+  );
 
   const handleLogoutClick = async () => {
     await logout();
     notify({
       title: 'Đã đăng xuất khỏi tài khoản',
-      message: 'Tiến độ học tập cục bộ của bạn vẫn được bảo toàn trên trình duyệt.',
+      message: 'Phiên đăng nhập và bộ nhớ tạm của tài khoản đã được xóa sạch.',
       type: 'info',
     });
     onCloseMobile?.();
@@ -260,7 +311,7 @@ export function LeftNavigationRail({
       >
         <nav aria-label="Điều hướng chính">
           <ul role="list" className="space-y-1.5">
-            {NAV_ITEMS.map(({ to, label, shortLabel, icon: Icon }) => (
+            {visibleNavItems.map(({ to, label, shortLabel, icon: Icon }) => (
               <li key={to}>
                 <NavLink
                   to={to}
@@ -356,7 +407,7 @@ export function LeftNavigationRail({
               </div>
 
               <ul role="list" className="space-y-1.5">
-                {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+                {visibleNavItems.map(({ to, label, icon: Icon }) => (
                   <li key={to}>
                     <NavLink
                       to={to}
@@ -379,30 +430,32 @@ export function LeftNavigationRail({
             </div>
 
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-              <Link
-                to="/profile"
-                onClick={onCloseMobile}
-                className="text-xs font-semibold text-slate-700 hover:text-blue-600 truncate max-w-[140px]"
-              >
-                {user?.fullName || MOCK_USER.fullName}
-              </Link>
               {isAuthenticated ? (
-                <button
-                  type="button"
-                  onClick={handleLogoutClick}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-semibold"
-                >
-                  <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Đăng xuất</span>
-                </button>
+                <>
+                  <Link
+                    to="/profile"
+                    onClick={onCloseMobile}
+                    className="text-xs font-semibold text-slate-700 hover:text-blue-600 truncate max-w-[140px]"
+                  >
+                    {user.fullName}
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={handleLogoutClick}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-semibold"
+                  >
+                    <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Đăng xuất</span>
+                  </button>
+                </>
               ) : (
                 <Link
                   to="/login"
                   onClick={onCloseMobile}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-semibold"
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold"
                 >
                   <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Đăng nhập</span>
+                  <span>Đăng nhập tài khoản</span>
                 </Link>
               )}
             </div>

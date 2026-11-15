@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -25,23 +25,54 @@ import {
 import { useToast } from '../../components/ToastProvider.jsx';
 import { LoadingSkeleton } from '../../components/UiStates.jsx';
 import { cn } from '../../utils/cn.js';
-import { subscribeStorageSync } from '../../utils/storage.js';
+import { STORAGE_KEYS, subscribeStorageSync } from '../../utils/storage.js';
+
+const getBarColor = (accuracy) => {
+  if (accuracy < 55) return '#dc2626';
+  if (accuracy < 70) return '#d97706';
+  return '#2563eb';
+};
 
 export default function AnalyticsDashboardPage() {
   const { notify } = useToast();
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const loadData = () => {
+  const loadData = useCallback(() => {
     getAnalyticsDashboard()
       .then((res) => setDashboard(res))
       .finally(() => setLoading(false));
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
-    return subscribeStorageSync(loadData);
-  }, []);
+    return subscribeStorageSync((changedKey) => {
+      // Chỉ tải lại khi đổi tài khoản (AUTH_USER), tuyệt đối không gọi lại khi chính getAnalyticsDashboard vừa ghi REVIEW_QUEUE_CACHE
+      if (!changedKey || changedKey === STORAGE_KEYS.AUTH_USER) {
+        loadData();
+      }
+    });
+  }, [loadData]);
+
+  const tagStats = useMemo(
+    () => (Array.isArray(dashboard?.tagStats) ? dashboard.tagStats : []),
+    [dashboard?.tagStats]
+  );
+
+  const weakTags = useMemo(
+    () => tagStats.filter((item) => item.accuracy < 65),
+    [tagStats]
+  );
+
+  const formatStats = useMemo(
+    () => (Array.isArray(dashboard?.formatStats) ? dashboard.formatStats : []),
+    [dashboard?.formatStats]
+  );
+
+  const reviewQueue = useMemo(
+    () => (Array.isArray(dashboard?.reviewQueue) ? dashboard.reviewQueue : []),
+    [dashboard?.reviewQueue]
+  );
 
   const handleAdvanceCycle = async (item) => {
     try {
@@ -75,15 +106,6 @@ export default function AnalyticsDashboardPage() {
       />
     );
   }
-
-  const { tagStats, formatStats, reviewQueue } = dashboard;
-  const weakTags = tagStats.filter((item) => item.accuracy < 65);
-
-  const getBarColor = (accuracy) => {
-    if (accuracy < 55) return '#dc2626';
-    if (accuracy < 70) return '#d97706';
-    return '#2563eb';
-  };
 
   return (
     <div className="space-y-6">
@@ -155,7 +177,7 @@ export default function AnalyticsDashboardPage() {
 
       {/* Biểu đồ Recharts: Tỷ lệ chính xác theo Tag & theo Định dạng */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <section className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+        <section className="lg:col-span-8 min-w-0 overflow-hidden bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
           <div>
             <h2 className="text-base font-bold text-slate-900">
               Biểu đồ Tỷ lệ Chính xác theo Chủ đề Kỹ thuật (%)
@@ -165,12 +187,12 @@ export default function AnalyticsDashboardPage() {
             </p>
           </div>
 
-          <div className="h-[280px] w-full">
+          <div className="h-[320px] w-full min-w-0 overflow-hidden">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={tagStats}
                 layout="vertical"
-                margin={{ top: 5, right: 24, left: 20, bottom: 5 }}
+                margin={{ top: 5, right: 24, left: 12, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis
@@ -182,7 +204,7 @@ export default function AnalyticsDashboardPage() {
                 <YAxis
                   dataKey="tag"
                   type="category"
-                  width={120}
+                  width={115}
                   tick={{ fontSize: 12, fill: '#0f172a', fontWeight: 600 }}
                 />
                 <Tooltip
@@ -193,7 +215,12 @@ export default function AnalyticsDashboardPage() {
                     fontSize: '12px',
                   }}
                 />
-                <Bar dataKey="accuracy" radius={[0, 6, 6, 0]} barSize={22}>
+                <Bar
+                  dataKey="accuracy"
+                  radius={[0, 6, 6, 0]}
+                  barSize={22}
+                  isAnimationActive={false}
+                >
                   {tagStats.map((entry) => (
                     <Cell
                       key={entry.tag}

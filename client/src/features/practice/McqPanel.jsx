@@ -6,10 +6,13 @@ import { cn } from '../../utils/cn.js';
 
 export default function McqPanel({ question, onAttemptComplete }) {
   const { notify } = useToast();
-  const { isMultiple, options, correctOptionIds } = question.payload;
+  const { isMultiple, options = [], correctOptionIds } = question.payload || {};
   const [selectedIds, setSelectedIds] = useState([]);
   const [submittedResult, setSubmittedResult] = useState(null);
   const [isEvaluating, setIsEvaluating] = useState(false);
+
+  const revealedCorrectIds =
+    submittedResult?.correctOptionIds || correctOptionIds || [];
 
   useEffect(() => {
     setSelectedIds([]);
@@ -89,7 +92,7 @@ export default function McqPanel({ question, onAttemptComplete }) {
           <legend className="visually-hidden">Danh sách phương án trả lời</legend>
           {options.map((opt, idx) => {
             const isChecked = selectedIds.includes(opt.id);
-            const isCorrectOption = correctOptionIds.includes(opt.id);
+            const isCorrectOption = revealedCorrectIds.includes(opt.id);
 
             let cardStateClass =
               'border-slate-200 bg-white hover:border-slate-300';
@@ -211,7 +214,8 @@ export default function McqPanel({ question, onAttemptComplete }) {
             <span>{submittedResult.message}</span>
           </div>
           <p className="text-xs sm:text-sm leading-relaxed text-slate-700">
-            <strong>Giải thích chuyên môn:</strong> {question.explanation}
+            <strong>Giải thích chuyên môn:</strong>{' '}
+            {submittedResult.explanation || question.explanation}
           </p>
         </div>
       )}

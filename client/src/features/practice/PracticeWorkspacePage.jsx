@@ -37,7 +37,10 @@ export default function PracticeWorkspacePage() {
       .then((res) => {
         if (!mounted) return;
         setWorkspaceData(res);
-        setBookmarked(isQuestionInReviewQueue(res.question._id));
+        setBookmarked(
+          Boolean(res.isBookmarked) ||
+            isQuestionInReviewQueue(res.question._id)
+        );
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -77,17 +80,25 @@ export default function PracticeWorkspacePage() {
     'bg-slate-100 text-slate-700 border-slate-200';
 
   const handleToggleBookmark = async () => {
-    const res = await toggleReviewBookmark(question);
-    setBookmarked(res.bookmarked);
-    notify({
-      title: res.bookmarked
-        ? 'Đã ghim vào Hàng đợi Ôn tập Ngắt quãng'
-        : 'Đã gỡ câu hỏi khỏi hàng đợi ôn tập',
-      message: res.bookmarked
-        ? 'Câu hỏi đã được đặt lịch ôn lại ở chu kỳ 1 ngày trong trang Phân tích Năng lực.'
-        : 'Bạn vẫn có thể ghim lại câu hỏi bất kỳ lúc nào.',
-      type: res.bookmarked ? 'success' : 'info',
-    });
+    try {
+      const res = await toggleReviewBookmark(question);
+      setBookmarked(res.bookmarked);
+      notify({
+        title: res.bookmarked
+          ? 'Đã ghim vào Hàng đợi Ôn tập Ngắt quãng'
+          : 'Đã gỡ câu hỏi khỏi hàng đợi ôn tập',
+        message: res.bookmarked
+          ? 'Câu hỏi đã được đặt lịch ôn lại ở chu kỳ 1 ngày trong trang Phân tích Năng lực.'
+          : 'Bạn vẫn có thể ghim lại câu hỏi bất kỳ lúc nào.',
+        type: res.bookmarked ? 'success' : 'info',
+      });
+    } catch (err) {
+      notify({
+        title: 'Không thể cập nhật đánh dấu ôn tập',
+        message: err.message,
+        type: 'error',
+      });
+    }
   };
 
   const handleAttemptComplete = (isCorrect) => {

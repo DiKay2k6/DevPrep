@@ -13,6 +13,8 @@
     line-height: 1.5;
     text-align: start;
     overflow-wrap: break-word;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   h1,

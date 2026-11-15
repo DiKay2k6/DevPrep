@@ -17,51 +17,64 @@ import { LoadingSkeleton } from '../../components/UiStates.jsx';
 import {
   CAREER_TRACKS,
   LEVELS,
-  MOCK_USER,
-  MOCK_USER_PROFILE,
 } from '../../data/tracks.mock.js';
+import { getStoredUser } from '../../utils/storage.js';
+
+const EMPTY_STATS = {
+  streakDays: 1,
+  solvedQuestions: 0,
+  readArticles: 0,
+  accuracyRate: 0,
+  completedMockTests: 0,
+};
 
 export default function ProfilePage() {
   const navigate = useNavigate();
   const { notify } = useToast();
   const outletCtx = useOutletContext() || {};
-  const selectedSkills =
-    outletCtx.selectedSkills || MOCK_USER_PROFILE.selectedSkills;
+  const selectedSkills = outletCtx.selectedSkills || [];
   const setSelectedSkills = outletCtx.setSelectedSkills || (() => {});
 
+  const cachedUser = getStoredUser();
   const [loading, setLoading] = useState(true);
-  const [userStats, setUserStats] = useState(MOCK_USER.stats);
+  const [isAuthenticated, setIsAuthenticated] = useState(Boolean(cachedUser));
+  const [userStats, setUserStats] = useState(cachedUser?.stats || EMPTY_STATS);
   const [userMeta, setUserMeta] = useState({
-    email: MOCK_USER.email,
-    role: MOCK_USER.role,
-    joinedAt: MOCK_USER.joinedAt,
+    email: cachedUser?.email || '',
+    role: cachedUser?.role || 'user',
+    joinedAt: cachedUser?.joinedAt || '03/2026',
   });
   const [profile, setProfile] = useState({
-    fullName: MOCK_USER.fullName,
+    fullName: cachedUser?.fullName || '',
     targetLevel:
       outletCtx.globalLevel && outletCtx.globalLevel !== 'All'
         ? outletCtx.globalLevel
-        : MOCK_USER.targetLevel,
-    targetTrack: MOCK_USER.targetTrack,
-    bio: MOCK_USER.bio,
+        : cachedUser?.targetLevel || 'Fresher',
+    targetTrack: cachedUser?.targetTrack || 'Full-stack',
+    bio: cachedUser?.bio || '',
   });
 
   useEffect(() => {
     let mounted = true;
     getCurrentUser()
       .then((user) => {
-        if (!mounted || !user) return;
+        if (!mounted) return;
+        if (!user) {
+          setIsAuthenticated(false);
+          return;
+        }
+        setIsAuthenticated(true);
         setProfile({
-          fullName: user.fullName || MOCK_USER.fullName,
-          targetLevel: user.targetLevel || MOCK_USER.targetLevel,
-          targetTrack: user.targetTrack || MOCK_USER.targetTrack,
-          bio: user.bio || MOCK_USER.bio,
+          fullName: user.fullName || '',
+          targetLevel: user.targetLevel || 'Fresher',
+          targetTrack: user.targetTrack || 'Full-stack',
+          bio: user.bio || '',
         });
-        setUserStats(user.stats || MOCK_USER.stats);
+        setUserStats(user.stats || EMPTY_STATS);
         setUserMeta({
-          email: user.email || MOCK_USER.email,
-          role: user.role || MOCK_USER.role,
-          joinedAt: user.joinedAt || MOCK_USER.joinedAt,
+          email: user.email || '',
+          role: user.role || 'user',
+          joinedAt: user.joinedAt || '03/2026',
         });
       })
       .finally(() => {
@@ -101,7 +114,7 @@ export default function ProfilePage() {
     await logout();
     notify({
       title: 'Đã đăng xuất khỏi phiên làm việc',
-      message: 'Dữ liệu học tập trên trình duyệt vẫn được giữ nguyên.',
+      message: 'Toàn bộ token và phiên làm việc hiện tại đã được xóa sạch.',
       type: 'info',
     });
     navigate('/login');
@@ -109,6 +122,33 @@ export default function ProfilePage() {
 
   if (loading) {
     return <LoadingSkeleton rows={3} label="Đang tải hồ sơ ứng viên..." />;
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <section className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-4 max-w-xl mx-auto">
+        <h1 className="text-xl font-bold text-slate-900">
+          Bạn chưa đăng nhập tài khoản
+        </h1>
+        <p className="text-sm text-slate-600">
+          Vui lòng đăng nhập hoặc tạo tài khoản mới để quản lý hồ sơ cá nhân, đồng bộ nhóm kỹ năng và lưu tiến độ luyện tập vào cơ sở dữ liệu.
+        </p>
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <Link
+            to="/login"
+            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold transition-colors"
+          >
+            Đăng nhập ngay
+          </Link>
+          <Link
+            to="/register"
+            className="px-5 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-sm font-bold transition-colors"
+          >
+            Tạo tài khoản mới
+          </Link>
+        </div>
+      </section>
+    );
   }
 
   return (

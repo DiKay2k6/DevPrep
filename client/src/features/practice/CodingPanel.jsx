@@ -49,8 +49,10 @@ export default function CodingPanel({ question, onAttemptComplete }) {
     setActiveBottomTab('testcases');
   }, [question._id, starterCode, supportedLanguages]);
 
-  const publicTestCases = testCases.filter((tc) => !tc.isHidden);
-  const hiddenCount = testCases.filter((tc) => tc.isHidden).length;
+  const publicTestCases = (testCases || []).filter((tc) => !tc.isHidden);
+  const hiddenCount =
+    question.payload?.hiddenTestCasesCount ??
+    (testCases || []).filter((tc) => tc.isHidden).length;
 
   const handleEditorChange = (val) => {
     const nextCode = val || '';

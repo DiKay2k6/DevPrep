@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react';
-import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
-import { ArrowRight, BookOpen, CheckCircle2, X } from 'lucide-react';
-import { getQuestions } from '../../api/questionsApi.js';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
+import { ArrowRight, BookOpen, CheckCircle2, Loader2, PlusCircle, X } from 'lucide-react';
+import { contributeQuestion, getQuestions } from '../../api/questionsApi.js';
 import LevelFilterBar from '../../components/LevelFilterBar.jsx';
+import { useToast } from '../../components/ToastProvider.jsx';
 import { EmptyState, LoadingSkeleton } from '../../components/UiStates.jsx';
 import { ARTICLES_MOCK } from '../../data/articles.mock.js';
-import { LEVELS, MOCK_USER_PROFILE } from '../../data/tracks.mock.js';
+import { CAREER_TRACKS, LEVELS } from '../../data/tracks.mock.js';
 import { cn } from '../../utils/cn.js';
+import { getStoredUser } from '../../utils/storage.js';
 
 const FORMAT_FILTERS = [
   { id: 'All', label: 'Tất cả hình thức' },
@@ -27,12 +29,34 @@ const FORMAT_NAMES = {
   coding: 'Viết code',
 };
 
+const INITIAL_CONTRIBUTE_FORM = {
+  title: '',
+  type: 'fill_blank',
+  level: 'Fresher',
+  category: 'Backend',
+  tagsText: 'Node.js, ExpressJS',
+  prompt: '',
+  codeSnippet: '',
+  acceptedAnswer: '',
+  optionA: '',
+  optionB: '',
+  optionC: '',
+  optionD: '',
+  correctOptionId: 'opt_a',
+  explanation: '',
+};
+
+const EMPTY_SKILLS = [];
+
 export default function PracticeListPage() {
+  const navigate = useNavigate();
+  const { notify } = useToast();
+  const dialogRef = useRef(null);
+
   const outletCtx = useOutletContext() || {};
   const globalLevel = outletCtx.globalLevel || 'All';
   const setGlobalLevel = outletCtx.setGlobalLevel || (() => {});
-  const selectedSkills =
-    outletCtx.selectedSkills || MOCK_USER_PROFILE.selectedSkills;
+  const selectedSkills = outletCtx.selectedSkills || EMPTY_SKILLS;
 
   const [searchParams, setSearchParams] = useSearchParams();
   const initialCategory = searchParams.get('category') || 'All';
@@ -45,9 +69,137 @@ export default function PracticeListPage() {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [formState, setFormState] = useState(INITIAL_CONTRIBUTE_FORM);
+  const [formErrors, setFormErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+
   const linkedArticle = articleIdFilter
     ? ARTICLES_MOCK.find((a) => a._id === articleIdFilter)
     : null;
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (isModalOpen) {
+      if (!dialog.open) dialog.showModal();
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  }, [isModalOpen]);
+
+  const handleOpenContributeModal = () => {
+    const user = getStoredUser();
+    if (!user) {
+      notify({
+        title: 'Yêu cầu đăng nhập',
+        message: 'Vui lòng đăng nhập tài khoản để đóng góp câu hỏi mới vào ngân hàng đề.',
+        type: 'info',
+      });
+      navigate('/login');
+      return;
+    }
+    setFormErrors({});
+    setIsModalOpen(true);
+  };
+
+  const validateContributeForm = () => {
+    const errs = {};
+    if (formState.title.trim().length < 5) {
+      errs.title = 'Tiêu đề câu hỏi cần tối thiểu 5 ký tự.';
+    }
+    if (formState.prompt.trim().length < 10) {
+      errs.prompt = 'Nội dung đề bài cần tối thiểu 10 ký tự.';
+    }
+    if (formState.type === 'mcq') {
+      if (!formState.optionA.trim() || !formState.optionB.trim()) {
+        errs.options = 'Vui lòng nhập tối thiểu phương án A và B.';
+      }
+    } else if (!formState.acceptedAnswer.trim()) {
+      errs.acceptedAnswer = 'Vui lòng nhập đáp án chuẩn hoặc kết quả kỳ vọng.';
+    }
+    if (formState.explanation.trim().length < 5) {
+      errs.explanation = 'Vui lòng nhập giải thích đáp án (tối thiểu 5 ký tự).';
+    }
+    return errs;
+  };
+
+  const handleContributeSubmit = async (e) => {
+    e.preventDefault();
+    const errs = validateContributeForm();
+    if (Object.keys(errs).length > 0) {
+      setFormErrors(errs);
+      return;
+    }
+
+    const tags = formState.tagsText
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    let payload = {};
+    if (formState.type === 'mcq') {
+      const options = [
+        { id: 'opt_a', text: formState.optionA.trim() },
+        { id: 'opt_b', text: formState.optionB.trim() },
+        formState.optionC.trim() && { id: 'opt_c', text: formState.optionC.trim() },
+        formState.optionD.trim() && { id: 'opt_d', text: formState.optionD.trim() },
+      ].filter(Boolean);
+      payload = {
+        isMultiple: false,
+        options,
+        correctOptionIds: [formState.correctOptionId],
+      };
+    } else {
+      payload = {
+        placeholder: 'Nhập kết quả dự đoán...',
+        caseSensitive: false,
+        acceptedAnswers: formState.acceptedAnswer
+          .split('|')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      };
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await contributeQuestion({
+        title: formState.title.trim(),
+        type: formState.type,
+        level: formState.level,
+        category: formState.category,
+        tags: tags.length > 0 ? tags : [formState.category],
+        prompt: formState.prompt.trim(),
+        codeSnippet: formState.codeSnippet.trim() || null,
+        payload,
+        explanation: formState.explanation.trim(),
+      });
+
+      notify({
+        title: 'Đã gửi câu hỏi đóng góp thành công!',
+        message:
+          res.question?.status === 'approved'
+            ? 'Câu hỏi của Admin đã được xuất bản trực tiếp lên ngân hàng đề.'
+            : 'Câu hỏi đã được lưu vào MongoDB với trạng thái chờ Admin phê duyệt (pending).',
+        type: 'success',
+      });
+
+      if (res.question?.status === 'approved') {
+        setQuestions((prev) => [res.question, ...prev]);
+      }
+
+      setFormState(INITIAL_CONTRIBUTE_FORM);
+      setIsModalOpen(false);
+    } catch (err) {
+      notify({
+        title: 'Không thể gửi câu hỏi đóng góp',
+        message: err.message,
+        type: 'error',
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -111,15 +263,26 @@ export default function PracticeListPage() {
           </p>
         </div>
 
-        {questions[0] && (
-          <Link
-            to={`/practice/${questions[0]._id}`}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold shadow-2xs shrink-0 transition-colors"
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={handleOpenContributeModal}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs sm:text-sm font-bold transition-colors"
           >
-            <span>Làm ngay câu đầu tiên</span>
-            <ArrowRight className="w-4 h-4" aria-hidden="true" />
-          </Link>
-        )}
+            <PlusCircle className="w-4 h-4 text-emerald-600" aria-hidden="true" />
+            <span>Đóng góp câu hỏi</span>
+          </button>
+
+          {questions[0] && (
+            <Link
+              to={`/practice/${questions[0]._id}`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold shadow-2xs transition-colors"
+            >
+              <span>Làm ngay câu đầu tiên</span>
+              <ArrowRight className="w-4 h-4" aria-hidden="true" />
+            </Link>
+          )}
+        </div>
       </header>
 
       {linkedArticle && (
@@ -318,6 +481,356 @@ export default function PracticeListPage() {
           </table>
         </div>
       )}
+
+      {/* Hộp thoại native <dialog> đóng góp câu hỏi mới vào MongoDB */}
+      <dialog
+        ref={dialogRef}
+        aria-labelledby="contribute-dialog-title"
+        onCancel={(e) => {
+          e.preventDefault();
+          setIsModalOpen(false);
+        }}
+        onClick={(e) => {
+          if (e.target === dialogRef.current) setIsModalOpen(false);
+        }}
+        className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl m-auto"
+      >
+        <form onSubmit={handleContributeSubmit} noValidate className="p-6 space-y-4">
+          <div className="flex items-start justify-between gap-4 pb-3 border-b border-slate-100">
+            <div>
+              <h2
+                id="contribute-dialog-title"
+                className="text-lg font-extrabold text-slate-900"
+              >
+                Đóng góp Câu hỏi Phỏng vấn Mới
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Câu hỏi của ứng viên sẽ được lưu với trạng thái <code>pending</code> để Quản trị viên phê duyệt trước khi xuất bản.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(false)}
+              aria-label="Đóng cửa sổ đóng góp câu hỏi"
+              className="w-8 h-8 rounded-full inline-flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-600"
+            >
+              <X className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </div>
+
+          <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1 scrollable-region">
+            <div>
+              <label
+                htmlFor="contrib-title"
+                className="block text-xs font-bold text-slate-800 mb-1"
+              >
+                Tiêu đề câu hỏi <span className="text-red-600">*</span>
+              </label>
+              <input
+                id="contrib-title"
+                type="text"
+                required
+                value={formState.title}
+                onChange={(e) => {
+                  setFormState((p) => ({ ...p, title: e.target.value }));
+                  if (formErrors.title) setFormErrors((p) => ({ ...p, title: '' }));
+                }}
+                placeholder="VD: Cơ chế Event Loop khi kết hợp Promise.resolve và setTimeout"
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+              />
+              {formErrors.title && (
+                <p role="alert" className="text-xs text-red-600 mt-1">
+                  {formErrors.title}
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label
+                  htmlFor="contrib-type"
+                  className="block text-xs font-bold text-slate-800 mb-1"
+                >
+                  Định dạng câu hỏi
+                </label>
+                <select
+                  id="contrib-type"
+                  value={formState.type}
+                  onChange={(e) =>
+                    setFormState((p) => ({ ...p, type: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white"
+                >
+                  <option value="fill_blank">Dự đoán Output (Fill Blank)</option>
+                  <option value="mcq">Trắc nghiệm (MCQ)</option>
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="contrib-level"
+                  className="block text-xs font-bold text-slate-800 mb-1"
+                >
+                  Cấp độ mục tiêu
+                </label>
+                <select
+                  id="contrib-level"
+                  value={formState.level}
+                  onChange={(e) =>
+                    setFormState((p) => ({ ...p, level: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white"
+                >
+                  {LEVELS.map((lvl) => (
+                    <option key={lvl.id} value={lvl.id}>
+                      {lvl.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="contrib-category"
+                  className="block text-xs font-bold text-slate-800 mb-1"
+                >
+                  Chuyên ngành
+                </label>
+                <select
+                  id="contrib-category"
+                  value={formState.category}
+                  onChange={(e) =>
+                    setFormState((p) => ({ ...p, category: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white"
+                >
+                  {CAREER_TRACKS.map((tr) => (
+                    <option key={tr.id} value={tr.id}>
+                      {tr.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="contrib-tags"
+                className="block text-xs font-bold text-slate-800 mb-1"
+              >
+                Nhãn kỹ năng (Tags, phân cách bởi dấu phẩy)
+              </label>
+              <input
+                id="contrib-tags"
+                type="text"
+                value={formState.tagsText}
+                onChange={(e) =>
+                  setFormState((p) => ({ ...p, tagsText: e.target.value }))
+                }
+                placeholder="VD: JavaScript, Node.js, ReactJS"
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="contrib-prompt"
+                className="block text-xs font-bold text-slate-800 mb-1"
+              >
+                Nội dung đề bài <span className="text-red-600">*</span>
+              </label>
+              <textarea
+                id="contrib-prompt"
+                rows={3}
+                value={formState.prompt}
+                onChange={(e) => {
+                  setFormState((p) => ({ ...p, prompt: e.target.value }));
+                  if (formErrors.prompt) setFormErrors((p) => ({ ...p, prompt: '' }));
+                }}
+                placeholder="Mô tả rõ yêu cầu câu hỏi hoặc ngữ cảnh bài toán..."
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+              />
+              {formErrors.prompt && (
+                <p role="alert" className="text-xs text-red-600 mt-1">
+                  {formErrors.prompt}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="contrib-snippet"
+                className="block text-xs font-bold text-slate-800 mb-1"
+              >
+                Đoạn mã minh họa (Code Snippet - Không bắt buộc)
+              </label>
+              <textarea
+                id="contrib-snippet"
+                rows={3}
+                value={formState.codeSnippet}
+                onChange={(e) =>
+                  setFormState((p) => ({ ...p, codeSnippet: e.target.value }))
+                }
+                placeholder="console.log(1); setTimeout(() => console.log(2), 0);"
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 font-mono text-xs bg-slate-50"
+              />
+            </div>
+
+            {formState.type === 'mcq' ? (
+              <div className="space-y-2 p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+                <p className="text-xs font-bold text-slate-800">
+                  Các phương án lựa chọn &amp; Đáp án đúng
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={formState.optionA}
+                    onChange={(e) =>
+                      setFormState((p) => ({ ...p, optionA: e.target.value }))
+                    }
+                    placeholder="Phương án A *"
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                  />
+                  <input
+                    type="text"
+                    value={formState.optionB}
+                    onChange={(e) =>
+                      setFormState((p) => ({ ...p, optionB: e.target.value }))
+                    }
+                    placeholder="Phương án B *"
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                  />
+                  <input
+                    type="text"
+                    value={formState.optionC}
+                    onChange={(e) =>
+                      setFormState((p) => ({ ...p, optionC: e.target.value }))
+                    }
+                    placeholder="Phương án C"
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                  />
+                  <input
+                    type="text"
+                    value={formState.optionD}
+                    onChange={(e) =>
+                      setFormState((p) => ({ ...p, optionD: e.target.value }))
+                    }
+                    placeholder="Phương án D"
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                  />
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <label
+                    htmlFor="contrib-correct-opt"
+                    className="text-xs font-semibold text-slate-700"
+                  >
+                    Phương án đúng:
+                  </label>
+                  <select
+                    id="contrib-correct-opt"
+                    value={formState.correctOptionId}
+                    onChange={(e) =>
+                      setFormState((p) => ({
+                        ...p,
+                        correctOptionId: e.target.value,
+                      }))
+                    }
+                    className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-xs font-bold text-emerald-700"
+                  >
+                    <option value="opt_a">Phương án A</option>
+                    <option value="opt_b">Phương án B</option>
+                    <option value="opt_c">Phương án C</option>
+                    <option value="opt_d">Phương án D</option>
+                  </select>
+                </div>
+                {formErrors.options && (
+                  <p role="alert" className="text-xs text-red-600">
+                    {formErrors.options}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div>
+                <label
+                  htmlFor="contrib-accepted"
+                  className="block text-xs font-bold text-slate-800 mb-1"
+                >
+                  Đáp án chuẩn được chấp nhận (phân cách nhiều cách viết bằng dấu |){' '}
+                  <span className="text-red-600">*</span>
+                </label>
+                <input
+                  id="contrib-accepted"
+                  type="text"
+                  value={formState.acceptedAnswer}
+                  onChange={(e) => {
+                    setFormState((p) => ({
+                      ...p,
+                      acceptedAnswer: e.target.value,
+                    }));
+                    if (formErrors.acceptedAnswer) {
+                      setFormErrors((p) => ({ ...p, acceptedAnswer: '' }));
+                    }
+                  }}
+                  placeholder="VD: 1 3 2 | 1, 3, 2"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 font-mono text-xs"
+                />
+                {formErrors.acceptedAnswer && (
+                  <p role="alert" className="text-xs text-red-600 mt-1">
+                    {formErrors.acceptedAnswer}
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div>
+              <label
+                htmlFor="contrib-explanation"
+                className="block text-xs font-bold text-slate-800 mb-1"
+              >
+                Giải thích chuyên môn cho đáp án <span className="text-red-600">*</span>
+              </label>
+              <textarea
+                id="contrib-explanation"
+                rows={2}
+                value={formState.explanation}
+                onChange={(e) => {
+                  setFormState((p) => ({ ...p, explanation: e.target.value }));
+                  if (formErrors.explanation) {
+                    setFormErrors((p) => ({ ...p, explanation: '' }));
+                  }
+                }}
+                placeholder="Giải thích ngắn gọn tại sao đáp án trên là chính xác..."
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs"
+              />
+              {formErrors.explanation && (
+                <p role="alert" className="text-xs text-red-600 mt-1">
+                  {formErrors.explanation}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(false)}
+              className="px-4 py-2 rounded-full border border-slate-300 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700"
+            >
+              Hủy
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs disabled:opacity-60"
+            >
+              {submitting && (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+              )}
+              <span>{submitting ? 'Đang gửi...' : 'Gửi câu hỏi đóng góp'}</span>
+            </button>
+          </div>
+        </form>
+      </dialog>
     </div>
   );
 }

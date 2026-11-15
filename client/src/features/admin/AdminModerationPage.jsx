@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Clock, FileCode2, XCircle } from 'lucide-react';
-import { getQuestions, moderateQuestion } from '../../api/questionsApi.js';
+import {
+  getAdminModerationQuestions,
+  moderateQuestion,
+} from '../../api/questionsApi.js';
 import { useToast } from '../../components/ToastProvider.jsx';
 import { EmptyState, LoadingSkeleton } from '../../components/UiStates.jsx';
 import { cn } from '../../utils/cn.js';
@@ -25,9 +28,18 @@ export default function AdminModerationPage() {
 
   useEffect(() => {
     let mounted = true;
-    getQuestions({ status: 'All' })
+    getAdminModerationQuestions('All')
       .then((list) => {
         if (mounted) setQuestions(list);
+      })
+      .catch((err) => {
+        if (mounted) {
+          notify({
+            title: 'Không thể tải danh sách kiểm duyệt',
+            message: err.message,
+            type: 'error',
+          });
+        }
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -35,17 +47,19 @@ export default function AdminModerationPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [notify]);
 
   const handleModerate = async (id, newStatus) => {
     try {
       const res = await moderateQuestion(id, newStatus);
-      setQuestions(res.questions);
+      setQuestions((prev) =>
+        prev.map((q) => (q._id === id ? { ...q, ...res.question, status: newStatus } : q))
+      );
       const statusLabel =
         newStatus === 'approved' ? 'Đã xuất bản' : 'Đã từ chối';
       notify({
         title: `Đã cập nhật trạng thái: ${statusLabel}`,
-        message: `Câu hỏi "${res.question?.title}" đã được lưu vào bộ nhớ trình duyệt.`,
+        message: `Câu hỏi "${res.question?.title}" đã được cập nhật trực tiếp vào MongoDB.`,
         type: newStatus === 'approved' ? 'success' : 'info',
       });
     } catch (err) {
@@ -206,7 +220,7 @@ export default function AdminModerationPage() {
                   <p className="text-slate-600">
                     Phương án đúng:{' '}
                     <code className="font-mono font-bold text-emerald-700">
-                      {q.payload.correctOptionIds.join(', ')}
+                      {(q.payload?.correctOptionIds || []).join(', ')}
                     </code>
                   </p>
                 )}
@@ -215,7 +229,7 @@ export default function AdminModerationPage() {
                   <p className="text-slate-600">
                     Các đáp án được chấp nhận:{' '}
                     <code className="font-mono font-bold text-emerald-700">
-                      {q.payload.acceptedAnswers.join(' | ')}
+                      {(q.payload?.acceptedAnswers || []).join(' | ')}
                     </code>
                   </p>
                 )}
@@ -224,10 +238,10 @@ export default function AdminModerationPage() {
                   <p className="text-slate-600">
                     Hàm kiểm thử:{' '}
                     <code className="font-mono">
-                      {q.payload.functionName}
+                      {q.payload?.functionName}
                     </code>{' '}
                     • Tổng số ca kiểm thử:{' '}
-                    <strong>{q.payload.testCases.length}</strong> (Bao gồm cả ca kiểm thử ẩn)
+                    <strong>{(q.payload?.testCases || []).length}</strong> (Bao gồm cả ca kiểm thử ẩn)
                   </p>
                 )}
 

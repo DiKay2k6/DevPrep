@@ -11,13 +11,14 @@ import {
 } from 'lucide-react';
 import {
   getActiveExamSessionSync,
+  getMockExamSession,
   saveActiveExamSessionSync,
   submitMockExam,
 } from '../../api/mockTestApi.js';
 import { useToast } from '../../components/ToastProvider.jsx';
+import { LoadingSkeleton } from '../../components/UiStates.jsx';
 import { MOCK_TEST_TEMPLATES } from '../../data/mockTest.mock.js';
 import { cn } from '../../utils/cn.js';
-import { getStoredQuestions } from '../../utils/storage.js';
 
 export default function MockTestRoomPage() {
   const [searchParams] = useSearchParams();
@@ -25,18 +26,17 @@ export default function MockTestRoomPage() {
   const { notify } = useToast();
 
   const templateId = searchParams.get('templateId') || MOCK_TEST_TEMPLATES[1].id;
-  const template =
+  const fallbackTemplate =
     MOCK_TEST_TEMPLATES.find((t) => t.id === templateId) ||
     MOCK_TEST_TEMPLATES[1];
 
-  const allQuestions = getStoredQuestions();
-  const examQuestions = template.questionIds
-    .map((id) => allQuestions.find((q) => q._id === id))
-    .filter(Boolean);
+  const [template, setTemplate] = useState(fallbackTemplate);
+  const [examQuestions, setExamQuestions] = useState([]);
+  const [loadingSession, setLoadingSession] = useState(true);
 
   const savedSession = getActiveExamSessionSync();
   const isResumingSameTemplate =
-    savedSession && savedSession.templateId === template.id;
+    savedSession && savedSession.templateId === fallbackTemplate.id;
 
   const totalDurationSeconds = template.durationMinutes * 60;
   const [currentIdx, setCurrentIdx] = useState(() =>
@@ -51,16 +51,33 @@ export default function MockTestRoomPage() {
   const [secondsLeft, setSecondsLeft] = useState(() =>
     isResumingSameTemplate && typeof savedSession.secondsLeft === 'number'
       ? savedSession.secondsLeft
-      : totalDurationSeconds
+      : fallbackTemplate.durationMinutes * 60
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const autoSubmittedRef = useRef(false);
+
+  useEffect(() => {
+    let mounted = true;
+    setLoadingSession(true);
+    getMockExamSession(templateId)
+      .then((data) => {
+        if (!mounted) return;
+        if (data?.template) setTemplate(data.template);
+        setExamQuestions(data?.questions || []);
+      })
+      .finally(() => {
+        if (mounted) setLoadingSession(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [templateId]);
 
   const currentQuestion = examQuestions[currentIdx] || examQuestions[0];
 
   // Lưu tự động trạng thái ca thi vào localStorage mỗi khi thay đổi
   useEffect(() => {
-    if (isSubmitting || secondsLeft <= 0) return;
+    if (loadingSession || isSubmitting || secondsLeft <= 0) return;
     saveActiveExamSessionSync({
       templateId: template.id,
       templateTitle: template.title,
@@ -71,6 +88,7 @@ export default function MockTestRoomPage() {
       updatedAt: Date.now(),
     });
   }, [
+    loadingSession,
     template.id,
     template.title,
     currentIdx,
@@ -128,6 +146,7 @@ export default function MockTestRoomPage() {
 
   // Đồng hồ đếm ngược thực tế (tự động thu bài khi chạm 00:00)
   useEffect(() => {
+    if (loadingSession) return undefined;
     if (secondsLeft <= 0) {
       handleFinishExam(true);
       return undefined;
@@ -136,7 +155,16 @@ export default function MockTestRoomPage() {
       setSecondsLeft((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [secondsLeft, handleFinishExam]);
+  }, [loadingSession, secondsLeft, handleFinishExam]);
+
+  if (loadingSession || !currentQuestion) {
+    return (
+      <LoadingSkeleton
+        rows={4}
+        label="Đang tải bộ câu hỏi phòng thi từ máy chủ..."
+      />
+    );
+  }
 
   const formatTimer = (secs) => {
     const mins = Math.floor(secs / 60);

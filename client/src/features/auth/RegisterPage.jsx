@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, UserPlus } from 'lucide-react';
 import { register } from '../../api/authApi.js';
 import { useToast } from '../../components/ToastProvider.jsx';
-import { LEVELS } from '../../data/tracks.mock.js';
+import { CAREER_TRACKS, LEVELS } from '../../data/tracks.mock.js';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -13,13 +13,15 @@ export default function RegisterPage() {
     email: '',
     password: '',
     targetLevel: 'Fresher',
+    targetTrack: 'Full-stack',
   });
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const validateField = (name, value) => {
-    if (name === 'fullName' && !value.trim()) {
-      return 'Vui lòng nhập họ và tên đầy đủ.';
+    if (name === 'fullName') {
+      if (!value.trim()) return 'Vui lòng nhập họ và tên đầy đủ.';
+      if (value.trim().length < 2) return 'Họ và tên cần tối thiểu 2 ký tự.';
     }
     if (name === 'email') {
       if (!value.trim()) return 'Vui lòng nhập địa chỉ email.';
@@ -28,8 +30,8 @@ export default function RegisterPage() {
       }
     }
     if (name === 'password') {
-      if (!value || value.length < 8) {
-        return 'Mật khẩu cần tối thiểu 8 ký tự.';
+      if (!value || value.length < 6) {
+        return 'Mật khẩu cần tối thiểu 6 ký tự.';
       }
     }
     return '';
@@ -66,11 +68,18 @@ export default function RegisterPage() {
       const user = await register(formData);
       notify({
         title: 'Đăng ký tài khoản thành công!',
-        message: `Hồ sơ ${user.fullName} đã được thiết lập ở cấp độ ${user.targetLevel}.`,
+        message: `Hồ sơ ${user.fullName} đã được lưu vào MongoDB ở cấp độ ${user.targetLevel}.`,
         type: 'success',
       });
       navigate('/tracks');
     } catch (err) {
+      if (Array.isArray(err.fieldErrors) && err.fieldErrors.length > 0) {
+        const mapped = {};
+        err.fieldErrors.forEach((item) => {
+          if (item.field) mapped[item.field] = item.message;
+        });
+        setErrors((prev) => ({ ...prev, ...mapped }));
+      }
       notify({
         title: 'Không thể tạo tài khoản',
         message: err.message,
@@ -176,7 +185,7 @@ export default function RegisterPage() {
             name="password"
             type="password"
             required
-            minLength={8}
+            minLength={6}
             autoComplete="new-password"
             enterKeyHint="done"
             value={formData.password}
@@ -187,7 +196,7 @@ export default function RegisterPage() {
             className="w-full min-h-[48px] px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-base text-slate-900 focus:border-[#0052FF]"
           />
           <span id="reg-password-constraints" className="text-xs text-slate-500">
-            Tối thiểu 8 ký tự, kết hợp chữ cái và chữ số để bảo vệ tài khoản.
+            Tối thiểu 6 ký tự, kết hợp chữ cái và chữ số để bảo vệ tài khoản.
           </span>
           {errors.password && (
             <p role="alert" className="text-xs text-red-600">
@@ -221,6 +230,28 @@ export default function RegisterPage() {
             ))}
           </div>
         </fieldset>
+
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="register-track"
+            className="text-sm font-semibold text-slate-800"
+          >
+            Chuyên ngành định hướng
+          </label>
+          <select
+            id="register-track"
+            name="targetTrack"
+            value={formData.targetTrack}
+            onChange={handleChange}
+            className="w-full min-h-[46px] px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-900 focus:border-[#0052FF]"
+          >
+            {CAREER_TRACKS.map((tr) => (
+              <option key={tr.id} value={tr.id}>
+                {tr.title} ({tr.id})
+              </option>
+            ))}
+          </select>
+        </div>
 
         <button
           type="submit"

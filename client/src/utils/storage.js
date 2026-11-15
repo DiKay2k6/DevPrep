@@ -1,31 +1,16 @@
-import { ARTICLES_MOCK } from '../data/articles.mock.js';
-import {
-  FORMAT_ACCURACY_STATS,
-  KNOWLEDGE_GAP_BY_TAG,
-  SPACED_REPETITION_QUEUE,
-} from '../data/analytics.mock.js';
-import { MOCK_TEST_RESULT_SAMPLE } from '../data/mockTest.mock.js';
-import { QUESTIONS_MOCK } from '../data/questions.mock.js';
-import { MOCK_USER, MOCK_USER_PROFILE } from '../data/tracks.mock.js';
-
 export const STORAGE_KEYS = {
-  AUTH_USER: 'devprep_auth_user_v2',
-  ACCESS_TOKEN: 'devprep_access_token_v2',
-  REFRESH_TOKEN: 'devprep_refresh_token_v2',
-  TARGET_LEVEL: 'devprep_target_level_v2',
-  SELECTED_SKILLS: 'devprep_selected_skills_v2',
-  COMPLETED_ARTICLES: 'devprep_completed_articles_v2',
-  SOLVED_QUESTIONS: 'devprep_solved_questions_v2',
-  CODE_DRAFTS: 'devprep_code_drafts_v2',
-  REVIEW_QUEUE: 'devprep_review_queue_v2',
-  TAG_STATS: 'devprep_tag_stats_v2',
-  FORMAT_STATS: 'devprep_format_stats_v2',
-  ACTIVE_EXAM: 'devprep_active_mock_exam_v2',
-  LAST_MOCK_RESULT: 'devprep_last_mock_result_v2',
-  QUESTIONS_STATE: 'devprep_questions_state_v2',
+  AUTH_USER: 'devprep_auth_user_v3',
+  ACCESS_TOKEN: 'devprep_access_token_v3',
+  REFRESH_TOKEN: 'devprep_refresh_token_v3',
+  PREFS_PREFIX: 'devprep_prefs_',
+  CODE_DRAFTS: 'devprep_code_drafts_v3',
+  ACTIVE_EXAM: 'devprep_active_mock_exam_v3',
+  LAST_MOCK_RESULT: 'devprep_last_mock_result_v3',
+  REVIEW_QUEUE_CACHE: 'devprep_review_queue_cache_v3',
 };
 
 const SYNC_EVENT = 'devprep:storage-sync';
+const DEFAULT_GUEST_SKILLS = ['JavaScript', 'ReactJS', 'Node.js'];
 
 export function readStorage(key, fallbackValue) {
   if (typeof window === 'undefined') return fallbackValue;
@@ -41,10 +26,14 @@ export function readStorage(key, fallbackValue) {
 export function writeStorage(key, value) {
   if (typeof window === 'undefined') return value;
   try {
+    const prevRaw = window.localStorage.getItem(key);
     if (value === null || value === undefined) {
+      if (prevRaw === null) return value;
       window.localStorage.removeItem(key);
     } else {
-      window.localStorage.setItem(key, JSON.stringify(value));
+      const nextRaw = JSON.stringify(value);
+      if (prevRaw === nextRaw) return value;
+      window.localStorage.setItem(key, nextRaw);
     }
     window.dispatchEvent(new CustomEvent(SYNC_EVENT, { detail: { key } }));
   } catch {
@@ -64,122 +53,195 @@ export function subscribeStorageSync(callback) {
   };
 }
 
+/**
+ * Lấy thông tin user đang đăng nhập.
+ * Trả về null nếu chưa đăng nhập (không dùng dữ liệu giả "Nguyễn Duy Khang").
+ */
 export function getStoredUser() {
-  return readStorage(STORAGE_KEYS.AUTH_USER, {
-    ...MOCK_USER,
-    isAuthenticated: true,
-    isDemo: true,
-  });
+  const user = readStorage(STORAGE_KEYS.AUTH_USER, null);
+  const token = readStorage(STORAGE_KEYS.ACCESS_TOKEN, null);
+  if (!user || !token || user.isAuthenticated === false) {
+    return null;
+  }
+  return user;
 }
 
 export function setStoredUser(user) {
-  return writeStorage(STORAGE_KEYS.AUTH_USER, user);
+  if (!user) {
+    return writeStorage(STORAGE_KEYS.AUTH_USER, null);
+  }
+  const normalizedUser = {
+    ...user,
+    _id: String(user._id || user.id || ''),
+    id: String(user.id || user._id || ''),
+    isAuthenticated: true,
+  };
+  writeStorage(STORAGE_KEYS.AUTH_USER, normalizedUser);
+
+  // Đồng bộ cache phụ theo hậu tố user._id (`devprep_prefs_${user._id}`)
+  if (normalizedUser._id) {
+    const prefKey = `${STORAGE_KEYS.PREFS_PREFIX}${normalizedUser._id}`;
+    const existingPrefs = readStorage(prefKey, {});
+    writeStorage(prefKey, {
+      ...existingPrefs,
+      targetLevel:
+        normalizedUser.targetLevel || existingPrefs.targetLevel || 'All',
+      selectedSkills: Array.isArray(normalizedUser.selectedSkills)
+        ? normalizedUser.selectedSkills
+        : existingPrefs.selectedSkills || DEFAULT_GUEST_SKILLS,
+      completedArticleIds: Array.isArray(normalizedUser.completedArticleIds)
+        ? normalizedUser.completedArticleIds
+        : existingPrefs.completedArticleIds || [],
+      solvedQuestionIds: Array.isArray(normalizedUser.solvedQuestionIds)
+        ? normalizedUser.solvedQuestionIds
+        : existingPrefs.solvedQuestionIds || [],
+    });
+  }
+
+  return normalizedUser;
+}
+
+/**
+ * Xóa sạch toàn bộ Token và Cache phiên cũ khi Đăng xuất hoặc đổi tài khoản.
+ */
+export function clearAuthSessionStorage() {
+  writeStorage(STORAGE_KEYS.ACCESS_TOKEN, null);
+  writeStorage(STORAGE_KEYS.REFRESH_TOKEN, null);
+  writeStorage(STORAGE_KEYS.AUTH_USER, null);
+  writeStorage(STORAGE_KEYS.REVIEW_QUEUE_CACHE, null);
+}
+
+function getCurrentUserPrefsKey() {
+  const user = getStoredUser();
+  const userId = user?._id || user?.id;
+  return userId
+    ? `${STORAGE_KEYS.PREFS_PREFIX}${userId}`
+    : `${STORAGE_KEYS.PREFS_PREFIX}guest`;
+}
+
+function readCurrentUserPrefs() {
+  return readStorage(getCurrentUserPrefsKey(), {});
+}
+
+function writeCurrentUserPrefs(patch) {
+  const key = getCurrentUserPrefsKey();
+  const current = readStorage(key, {});
+  return writeStorage(key, { ...current, ...patch });
 }
 
 export function getStoredTargetLevel() {
-  return readStorage(STORAGE_KEYS.TARGET_LEVEL, 'All');
+  const user = getStoredUser();
+  const prefs = readCurrentUserPrefs();
+  return prefs.targetLevel || user?.targetLevel || 'All';
 }
 
 export function setStoredTargetLevel(level) {
-  return writeStorage(STORAGE_KEYS.TARGET_LEVEL, level || 'All');
+  const resolved = level || 'All';
+  writeCurrentUserPrefs({ targetLevel: resolved });
+  const user = getStoredUser();
+  if (user && resolved !== 'All') {
+    writeStorage(STORAGE_KEYS.AUTH_USER, { ...user, targetLevel: resolved });
+  }
+  return resolved;
 }
 
 export function getStoredSelectedSkills() {
-  return readStorage(
-    STORAGE_KEYS.SELECTED_SKILLS,
-    MOCK_USER_PROFILE.selectedSkills
-  );
+  const user = getStoredUser();
+  if (user && Array.isArray(user.selectedSkills)) {
+    return user.selectedSkills;
+  }
+  const prefs = readCurrentUserPrefs();
+  return Array.isArray(prefs.selectedSkills)
+    ? prefs.selectedSkills
+    : DEFAULT_GUEST_SKILLS;
 }
 
 export function setStoredSelectedSkills(skills) {
-  return writeStorage(
-    STORAGE_KEYS.SELECTED_SKILLS,
-    Array.isArray(skills) ? skills : []
-  );
+  const safeSkills = Array.isArray(skills) ? skills : [];
+  writeCurrentUserPrefs({ selectedSkills: safeSkills });
+  const user = getStoredUser();
+  if (user) {
+    writeStorage(STORAGE_KEYS.AUTH_USER, {
+      ...user,
+      selectedSkills: safeSkills,
+    });
+  }
+  return safeSkills;
 }
 
 export function getCompletedArticleIds() {
-  return readStorage(STORAGE_KEYS.COMPLETED_ARTICLES, [
-    'art_js_event_loop_01',
-    'art_mongo_compound_idx_02',
-  ]);
+  const user = getStoredUser();
+  if (user && Array.isArray(user.completedArticleIds)) {
+    return user.completedArticleIds;
+  }
+  const prefs = readCurrentUserPrefs();
+  return Array.isArray(prefs.completedArticleIds)
+    ? prefs.completedArticleIds
+    : [];
 }
 
 export function setCompletedArticleIds(ids) {
-  return writeStorage(STORAGE_KEYS.COMPLETED_ARTICLES, ids);
+  const safeIds = Array.isArray(ids) ? ids : [];
+  writeCurrentUserPrefs({ completedArticleIds: safeIds });
+  const user = getStoredUser();
+  if (user) {
+    writeStorage(STORAGE_KEYS.AUTH_USER, {
+      ...user,
+      completedArticleIds: safeIds,
+      stats: {
+        ...(user.stats || {}),
+        readArticles: safeIds.length,
+      },
+    });
+  }
+  return safeIds;
 }
 
 export function getSolvedQuestionIds() {
-  return readStorage(STORAGE_KEYS.SOLVED_QUESTIONS, [
-    'q_mcq_event_loop_01',
-    'q_fill_event_loop_02',
-    'q_fill_mongo_select_04',
-    'q_coding_two_sum_07',
-  ]);
+  const user = getStoredUser();
+  if (user && Array.isArray(user.solvedQuestionIds)) {
+    return user.solvedQuestionIds;
+  }
+  const prefs = readCurrentUserPrefs();
+  return Array.isArray(prefs.solvedQuestionIds) ? prefs.solvedQuestionIds : [];
 }
 
 export function setSolvedQuestionIds(ids) {
-  return writeStorage(STORAGE_KEYS.SOLVED_QUESTIONS, ids);
-}
-
-export function getStoredQuestions() {
-  const saved = readStorage(STORAGE_KEYS.QUESTIONS_STATE, null);
-  if (!Array.isArray(saved) || saved.length === 0) {
-    return QUESTIONS_MOCK;
+  const safeIds = Array.isArray(ids) ? ids : [];
+  writeCurrentUserPrefs({ solvedQuestionIds: safeIds });
+  const user = getStoredUser();
+  if (user) {
+    writeStorage(STORAGE_KEYS.AUTH_USER, {
+      ...user,
+      solvedQuestionIds: safeIds,
+      stats: {
+        ...(user.stats || {}),
+        solvedQuestions: safeIds.length,
+      },
+    });
   }
-  const savedMap = new Map(saved.map((item) => [item._id, item]));
-  const merged = QUESTIONS_MOCK.map((q) => savedMap.get(q._id) || q);
-  const customOnly = saved.filter(
-    (item) => !QUESTIONS_MOCK.some((q) => q._id === item._id)
-  );
-  return [...customOnly, ...merged];
-}
-
-export function setStoredQuestions(questions) {
-  return writeStorage(STORAGE_KEYS.QUESTIONS_STATE, questions);
+  return safeIds;
 }
 
 export function getStoredReviewQueue() {
-  return readStorage(STORAGE_KEYS.REVIEW_QUEUE, SPACED_REPETITION_QUEUE);
+  return readStorage(STORAGE_KEYS.REVIEW_QUEUE_CACHE, []);
 }
 
 export function setStoredReviewQueue(queue) {
-  return writeStorage(STORAGE_KEYS.REVIEW_QUEUE, queue);
-}
-
-export function getStoredTagStats() {
-  return readStorage(STORAGE_KEYS.TAG_STATS, KNOWLEDGE_GAP_BY_TAG);
-}
-
-export function setStoredTagStats(stats) {
-  return writeStorage(STORAGE_KEYS.TAG_STATS, stats);
-}
-
-export function getStoredFormatStats() {
-  return readStorage(STORAGE_KEYS.FORMAT_STATS, FORMAT_ACCURACY_STATS);
-}
-
-export function setStoredFormatStats(stats) {
-  return writeStorage(STORAGE_KEYS.FORMAT_STATS, stats);
+  return writeStorage(
+    STORAGE_KEYS.REVIEW_QUEUE_CACHE,
+    Array.isArray(queue) ? queue : []
+  );
 }
 
 export function getStoredLastMockResult() {
-  return readStorage(STORAGE_KEYS.LAST_MOCK_RESULT, MOCK_TEST_RESULT_SAMPLE);
+  const user = getStoredUser();
+  const suffix = user?._id || user?.id || 'guest';
+  return readStorage(`${STORAGE_KEYS.LAST_MOCK_RESULT}_${suffix}`, null);
 }
 
 export function setStoredLastMockResult(result) {
-  return writeStorage(STORAGE_KEYS.LAST_MOCK_RESULT, result);
-}
-
-export function findRecommendedArticleForTag(tag) {
-  const normalized = String(tag || '').toLowerCase();
-  const matched =
-    ARTICLES_MOCK.find((a) =>
-      a.tags.some((t) => t.toLowerCase() === normalized)
-    ) || ARTICLES_MOCK[0];
-  return {
-    slug: matched.slug,
-    title: matched.title,
-    category: matched.category,
-  };
+  const user = getStoredUser();
+  const suffix = user?._id || user?.id || 'guest';
+  return writeStorage(`${STORAGE_KEYS.LAST_MOCK_RESULT}_${suffix}`, result);
 }
